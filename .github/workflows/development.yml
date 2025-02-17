@@ -1,12 +1,13 @@
 name: Development build
 
 on:
-  push:
-    branches:
-      - 'main'  # Adjust to match your development branch
   pull_request:
-    branches:
-      - 'main'
+    branches-ignore:
+      - 'l10n_main'
+    types: [opened, reopened]
+  push:
+    branches-ignore:
+      - 'l10n_main'
 
   workflow_dispatch:
 
