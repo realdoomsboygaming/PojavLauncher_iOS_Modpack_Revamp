@@ -4,17 +4,24 @@
 #import "UIKit+AFNetworking.h"
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
-#import "modpack/ModrinthAPI.h"
+#import "ModrinthAPI.h"  // Import both APIs
+#import "CurseforgeAPI.h"
 #import "config.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #include <dlfcn.h>
 
 @interface ModpackInstallViewController () <UISearchResultsUpdating>
+
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) NSMutableArray *list;
 @property (nonatomic, strong) NSMutableDictionary *filters;
-@property (nonatomic, strong) ModrinthAPI *modrinth;
+
+@property (nonatomic, strong) ModrinthAPI *modrinth;  // ModrinthAPI
+@property (nonatomic, strong) CurseforgeAPI *curseforge;  // CurseForgeAPI
+
+@property (nonatomic, assign) BOOL isUsingCurseForge;  // Boolean to track which API is active
+
 @end
 
 @implementation ModpackInstallViewController
@@ -35,10 +42,31 @@
     self.searchController.searchBar.placeholder = @"Search Modpacks";
     self.navigationItem.searchController = self.searchController;
     
+    // Initialize both APIs
     self.modrinth = [ModrinthAPI new];
+    self.curseforge = [[CurseforgeAPI alloc] initWithApiKey:@"your_api_key_here"];  // Initialize with API key
+    
+    // Default API to use
+    self.isUsingCurseForge = NO;  // Initially using Modrinth
+    
     self.filters = [@{ @"isModpack": @(YES), @"name": @" " } mutableCopy];
     
+    // Add a Segmented Control to switch between APIs
+    [self addAPISelectionControl];
+    
     [self updateSearchResults];
+}
+
+- (void)addAPISelectionControl {
+    UISegmentedControl *apiSwitch = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
+    apiSwitch.selectedSegmentIndex = self.isUsingCurseForge ? 1 : 0;
+    [apiSwitch addTarget:self action:@selector(apiSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+    self.navigationItem.titleView = apiSwitch;
+}
+
+- (void)apiSwitchChanged:(UISegmentedControl *)sender {
+    self.isUsingCurseForge = sender.selectedSegmentIndex == 1;
+    [self updateSearchResults];  // Update the search results when the API is switched
 }
 
 - (void)refreshSearchResults {
@@ -52,13 +80,20 @@
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.filters[@"name"] = name;
-        self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
+        
+        // Use the correct API based on the selection
+        if (self.isUsingCurseForge) {
+            self.list = [self.curseforge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
+        } else {
+            self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
+        }
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.list) {
                 [self switchToReadyState];
                 [self.tableView reloadData];
             } else {
-                showDialog(@"Error", self.modrinth.lastError.localizedDescription);
+                showDialog(@"Error", self.isUsingCurseForge ? self.curseforge.lastError.localizedDescription : self.modrinth.lastError.localizedDescription);
                 [self actionClose];
             }
             if (self.refreshControl.isRefreshing) {
@@ -119,26 +154,58 @@
     
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [self.modrinth loadDetailsOfMod:item];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self switchToReadyState];
-            if ([item[@"versionDetailsLoaded"] boolValue]) {
-                [self presentVersionOptionsForItem:item atIndexPath:indexPath];
-            } else {
-                showDialog(@"Error", self.modrinth.lastError.localizedDescription);
-            }
-        });
+        if (self.isUsingCurseForge) {
+            [self.curseforge loadModDetails:item completion:^(NSDictionary *modDetails) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self switchToReadyState];
+                    if (modDetails) {
+                        [self presentVersionOptionsForItem:item atIndexPath:indexPath modDetails:modDetails];
+                    } else {
+                        showDialog(@"Error", self.curseforge.lastError.localizedDescription);
+                    }
+                });
+            }];
+        } else {
+            [self.modrinth loadModDetails:item completion:^(NSDictionary *modDetails) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self switchToReadyState];
+                    if (modDetails) {
+                        [self presentVersionOptionsForItem:item atIndexPath:indexPath modDetails:modDetails];
+                    } else {
+                        showDialog(@"Error", self.modrinth.lastError.localizedDescription);
+                    }
+                });
+            }];
+        }
     });
 }
 
-- (void)presentVersionOptionsForItem:(NSDictionary *)item atIndexPath:(NSIndexPath *)indexPath {
+- (void)presentVersionOptionsForItem:(NSDictionary *)item atIndexPath:(NSIndexPath *)indexPath modDetails:(NSDictionary *)modDetails {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:item[@"title"] message:@"Select a version to install" preferredStyle:UIAlertControllerStyleActionSheet];
     
-    NSArray *versionNames = item[@"versionNames"];
+    NSArray *versionNames = modDetails[@"versionNames"];
     for (NSString *versionName in versionNames) {
         UIAlertAction *action = [UIAlertAction actionWithTitle:versionName style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             [self actionClose];
-            [self.modrinth installModpackFromDetail:item atIndex:[versionNames indexOfObject:versionName]];
+            if (self.isUsingCurseForge) {
+                [self.curseforge downloadModpack:item atVersion:versionName completion:^(BOOL success, NSError *error) {
+                    if (success) {
+                        // Handle success
+                    } else {
+                        // Handle error
+                        showDialog(@"Error", error.localizedDescription);
+                    }
+                }];
+            } else {
+                [self.modrinth downloadModpack:item atVersion:versionName completion:^(BOOL success, NSError *error) {
+                    if (success) {
+                        // Handle success
+                    } else {
+                        // Handle error
+                        showDialog(@"Error", error.localizedDescription);
+                    }
+                }];
+            }
         }];
         [alert addAction:action];
     }
