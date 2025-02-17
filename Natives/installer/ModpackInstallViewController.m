@@ -10,7 +10,12 @@
 #import "utils.h"
 #include <dlfcn.h>
 
-// Helper classes (placeholders - implement these separately)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
+#import <WebKit/WKDownload.h>
+#pragma clang diagnostic pop
+
+// Helper classes (placeholders)
 @interface ImageCache : NSObject
 + (instancetype)shared;
 - (UIImage *)imageForKey:(NSString *)key;
@@ -32,11 +37,12 @@
 @property(nonatomic) NSMutableArray *list;
 @property(nonatomic) NSMutableDictionary *filters;
 @property(nonatomic) NSURLSessionDataTask *currentTask;
-@property(strong, nonatomic) UIRefreshControl *refreshControl;
+@property (nonatomic, strong) NSIndexPath *selectedIndexPath;
 @property ModrinthAPI *modrinth;
 @end
 
 @implementation ModpackInstallViewController
+@dynamic refreshControl;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -44,13 +50,11 @@
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 80;
     
-    // Setup refresh control
     self.refreshControl = [[UIRefreshControl alloc] init];
     [self.refreshControl addTarget:self action:@selector(handleRefresh:) 
                   forControlEvents:UIControlEventValueChanged];
     self.tableView.refreshControl = self.refreshControl;
     
-    // Configure search
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -203,12 +207,13 @@
     if (cachedImage) {
         cell.imageView.image = cachedImage;
     } else {
-        [cell.imageView setImageWithURLRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:item[@"imageUrl"]] 
+        [cell.imageView setImageWithURLRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:item[@"imageUrl"]]
                              placeholderImage:[UIImage imageNamed:@"DefaultProfile"]
                                       success:^(NSURLRequest *request, NSHTTPURLResponse *response, UIImage *image) {
-            [ImageCache.shared cacheImage:image forKey:item[@"imageUrl"]];
-            cell.imageView.image = image;
-        } failure:nil];
+                                          [ImageCache.shared cacheImage:image forKey:item[@"imageUrl"]];
+                                          cell.imageView.image = image;
+                                      }
+                                      failure:nil];
     }
     
     // Accessibility
@@ -224,6 +229,7 @@
 }
 
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
+    self.selectedIndexPath = indexPath;
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     
     NSMutableArray<UIAction *> *menuItems = [[NSMutableArray alloc] init];
@@ -255,6 +261,7 @@
     if (indexPath.row >= self.list.count) return;
     
     NSDictionary *item = self.list[indexPath.row];
+    self.selectedIndexPath = indexPath;
     if ([item[@"versionDetailsLoaded"] boolValue]) {
         [self showDetails:item atIndexPath:indexPath];
         return;
@@ -290,8 +297,9 @@
         willPerformPreviewActionForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration 
         animator:(id<UIContextMenuInteractionCommitAnimating>)animator {
     [animator addCompletion:^{
-        NSIndexPath *indexPath = [tableView indexPathForRowAtPoint:[animator previewLocation]];
-        [self tableView:tableView didSelectRowAtIndexPath:indexPath];
+        if (self.selectedIndexPath) {
+            [self tableView:tableView didSelectRowAtIndexPath:self.selectedIndexPath];
+        }
     }];
 }
 
