@@ -5,6 +5,8 @@
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
 #import "config.h"
+#import "CurseforgeAPI.h"
+#import "ModrinthAPI.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #include <dlfcn.h>
