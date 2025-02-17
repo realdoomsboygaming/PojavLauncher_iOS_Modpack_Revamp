@@ -4,8 +4,6 @@
 #import "UIKit+AFNetworking.h"
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
-#import "ModrinthAPI.h"  // Import both APIs
-#import "CurseforgeAPI.h"
 #import "config.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
