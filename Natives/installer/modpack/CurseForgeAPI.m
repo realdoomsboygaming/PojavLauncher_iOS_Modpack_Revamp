@@ -2,9 +2,7 @@
 
 @interface CurseForgeAPI : NSObject
 
-@property (nonatomic, strong) NSString *apiKey;
-
-- (instancetype)initWithApiKey:(NSString *)apiKey;
+- (instancetype)init;
 - (void)getModDetailsWithModId:(NSInteger)modId completion:(void (^)(NSDictionary *modDetails, NSError *error))completion;
 - (void)searchModsWithFilters:(NSDictionary *)filters completion:(void (^)(NSArray *mods, NSError *error))completion;
 - (void)installModpackWithModpackId:(NSInteger)modpackId completion:(void (^)(BOOL success, NSError *error))completion;
@@ -13,10 +11,10 @@
 
 @implementation CurseForgeAPI
 
-- (instancetype)initWithApiKey:(NSString *)apiKey {
+- (instancetype)init {
     self = [super init];
     if (self) {
-        _apiKey = apiKey;
+        // No API key needed, so no initialization for apiKey
     }
     return self;
 }
