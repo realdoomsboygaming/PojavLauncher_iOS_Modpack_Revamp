@@ -25,7 +25,13 @@
 - (void)performGETRequestWithURL:(NSURL *)url completion:(void (^)(NSData *data, NSError *error))completion {
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
+            NSLog(@"GET request failed: %@", error.localizedDescription);
             completion(nil, error);
+            return;
+        }
+        if (!data) {
+            NSError *noDataError = [NSError errorWithDomain:@"CurseForgeAPI" code:1001 userInfo:@{NSLocalizedDescriptionKey: @"No data received"}];
+            completion(nil, noDataError);
             return;
         }
         completion(data, nil);
@@ -42,6 +48,7 @@
     NSError *jsonError;
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:parameters options:0 error:&jsonError];
     if (jsonError) {
+        NSLog(@"Error serializing parameters: %@", jsonError.localizedDescription);
         completion(nil, jsonError);
         return;
     }
@@ -49,7 +56,13 @@
     
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
+            NSLog(@"POST request failed: %@", error.localizedDescription);
             completion(nil, error);
+            return;
+        }
+        if (!data) {
+            NSError *noDataError = [NSError errorWithDomain:@"CurseForgeAPI" code:1001 userInfo:@{NSLocalizedDescriptionKey: @"No data received"}];
+            completion(nil, noDataError);
             return;
         }
         completion(data, nil);
@@ -71,10 +84,15 @@
         NSError *jsonError;
         NSDictionary *modDetails = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if (jsonError) {
+            NSLog(@"Error parsing mod details: %@", jsonError.localizedDescription);
             completion(nil, jsonError);
             return;
         }
-        completion(modDetails, nil);
+        
+        // Ensure UI updates happen on the main thread
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(modDetails, nil);
+        });
     }];
 }
 
@@ -92,12 +110,17 @@
         NSError *jsonError;
         NSDictionary *response = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if (jsonError) {
+            NSLog(@"Error parsing mod search response: %@", jsonError.localizedDescription);
             completion(nil, jsonError);
             return;
         }
         
         NSArray *mods = response[@"mods"];
-        completion(mods, nil);
+        
+        // Ensure UI updates happen on the main thread
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(mods, nil);
+        });
     }];
 }
 
@@ -117,12 +140,17 @@
         NSError *jsonError;
         NSDictionary *response = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if (jsonError) {
+            NSLog(@"Error parsing modpack install response: %@", jsonError.localizedDescription);
             completion(NO, jsonError);
             return;
         }
         
         BOOL success = [response[@"success"] boolValue];
-        completion(success, nil);
+        
+        // Ensure UI updates happen on the main thread
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(success, nil);
+        });
     }];
 }
 
