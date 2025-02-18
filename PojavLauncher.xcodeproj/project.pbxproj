@@ -95,6 +95,10 @@
 				SIGNING_TEAMID = H9UFLHHUZ5;
 				TEAMID = FBT742498U;
 				VERBOSE = 1;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Natives/external/**",
+				);
 			};
 			name = Debug;
 		};
@@ -108,6 +112,10 @@
 				SIGNING_TEAMID = H9UFLHHUZ5;
 				TEAMID = FBT742498U;
 				VERBOSE = 0;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Natives/external/**",
+				);
 			};
 			name = Release;
 		};
