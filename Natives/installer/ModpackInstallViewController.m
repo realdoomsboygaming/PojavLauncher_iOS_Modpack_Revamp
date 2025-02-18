@@ -17,6 +17,7 @@
 
 @interface ModpackInstallViewController()<UIContextMenuInteractionDelegate>
 @property(nonatomic) UISearchController *searchController;
+@property(nonatomic) UISegmentedControl *sourceSegmentedControl;
 @property(nonatomic) UIMenu *currentMenu;
 @property(nonatomic) NSMutableArray *list;
 @property(nonatomic) NSMutableDictionary *filters;
