@@ -1,6 +1,5 @@
-#import <Foundation/Foundation.h>
-#import <AFNetworking/AFNetworking.h>
 #import "CurseForgeAPI.h"
+#import <AFNetworking/AFNetworking.h>
 
 #define CURSEFORGE_API_URL @"https://api.curseforge.com/v1"
 #define CURSEFORGE_MINECRAFT_GAME_ID 432
@@ -200,6 +199,7 @@
 }
 
 - (void)installDependencies:(CurseForgeManifest *)manifest completion:(void (^)(BOOL success, NSError *error))completion {
+    completion(YES, nil);
 }
 
 @end
