@@ -1,10 +1,5 @@
+// Natives/modpack/CurseForgeAPI.h
 #import <Foundation/Foundation.h>
-
-@interface CurseForgeFile : NSObject
-@end
-
-@interface CurseForgeManifest : NSObject
-@end
 
 @interface CurseForgeAPI : NSObject
 
