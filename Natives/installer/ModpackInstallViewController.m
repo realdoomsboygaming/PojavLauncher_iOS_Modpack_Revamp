@@ -10,7 +10,6 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #include <dlfcn.h>
-#import <SDWebImage/UIImageView+WebCache.h>
 
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
@@ -150,7 +149,7 @@
     cell.detailTextLabel.text = item[@"description"];
     
     UIImage *fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    [cell.imageView sd_setImageWithURL:[NSURL URLWithString:item[@"imageUrl"]] placeholderImage:fallbackImage];
+    cell.imageView.image = fallbackImage;  // Removed SDWebImage, using local fallback image instead
     
     if (self.sourceSegmentedControl.selectedSegmentIndex == 0 && !self.modrinth.reachedLastPage && indexPath.row == self.list.count - 1) {
         [self loadSearchResultsWithPrevList:YES];
