@@ -40,7 +40,7 @@
     self.tableView.tableHeaderView = self.sourceSegmentedControl;
     
     self.modrinth = [ModrinthAPI new];
-    self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:CONFIG_CURSEFORGE_API_KEY];
+    self.curseForge = [[CurseForgeAPI alloc] init];
     
     self.filters = [@{
         @"isModpack": @(YES),
