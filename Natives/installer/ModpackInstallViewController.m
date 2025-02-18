@@ -10,6 +10,7 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #include <dlfcn.h>
+#import <SDWebImage/UIImageView+WebCache.h>
 
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
@@ -33,16 +34,20 @@
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
+    
     self.sourceSegmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
     self.sourceSegmentedControl.selectedSegmentIndex = 0;
     [self.sourceSegmentedControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.sourceSegmentedControl;
+    
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:CONFIG_CURSEFORGE_API_KEY];
+    
     self.filters = [@{
         @"isModpack": @(YES),
         @"name": @" "
     } mutableCopy];
+    
     [self updateSearchResults];
 }
 
@@ -122,12 +127,6 @@
     }];
 }
 
-- (_UIContextMenuStyle *)_contextMenuInteraction:(UIContextMenuInteraction *)interaction styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration {
-    _UIContextMenuStyle *style = [_UIContextMenuStyle defaultStyle];
-    style.preferredLayout = 3;
-    return style;
-}
-
 #pragma mark - UITableViewDataSource
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -149,8 +148,9 @@
     NSDictionary *item = self.list[indexPath.row];
     cell.textLabel.text = item[@"title"];
     cell.detailTextLabel.text = item[@"description"];
+    
     UIImage *fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    [cell.imageView setImageWithURL:[NSURL URLWithString:item[@"imageUrl"]] placeholderImage:fallbackImage];
+    [cell.imageView sd_setImageWithURL:[NSURL URLWithString:item[@"imageUrl"]] placeholderImage:fallbackImage];
     
     if (self.sourceSegmentedControl.selectedSegmentIndex == 0 && !self.modrinth.reachedLastPage && indexPath.row == self.list.count - 1) {
         [self loadSearchResultsWithPrevList:YES];
