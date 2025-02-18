@@ -20,7 +20,6 @@
 @property(nonatomic) NSMutableArray *list;
 @property(nonatomic) NSMutableDictionary *filters;
 @property ModrinthAPI *modrinth;
-@property (nonatomic, strong) NSString *selectedAPI; // Added to switch between APIs
 @end
 
 @implementation ModpackInstallViewController
@@ -28,16 +27,16 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    self.selectedAPI = @"Modrinth"; // Default to Modrinth
+    //NSString *curseforgeAPIKey = CONFIG_CURSEFORGE_API_KEY;
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
-
     self.modrinth = [ModrinthAPI new];
     self.filters = @{
         @"isModpack": @(YES),
         @"name": @" "
+        // mcVersion
     }.mutableCopy;
     [self updateSearchResults];
 }
@@ -51,14 +50,7 @@
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.filters[@"name"] = name;
-
-        if ([self.selectedAPI isEqualToString:@"Modrinth"]) {
-            self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
-        } else if ([self.selectedAPI isEqualToString:@"CurseForge"]) {
-            [self fetchCurseForgeModpacksWithName:name prevList:prevList];
-            return;
-        }
-
+        self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.list) {
                 [self switchToReadyState];
@@ -71,52 +63,6 @@
     });
 }
 
-- (void)fetchCurseForgeModpacksWithName:(NSString *)name prevList:(BOOL)prevList {
-    // Use the CurseForge API to search for modpacks
-    NSString *urlString = [NSString stringWithFormat:@"https://api.curseforge.com/v1/mods/search?gameId=%@&classId=%@&search=%@", @(kCurseForgeGameIDMinecraft), @(kCurseForgeClassIDModpack), name];
-    
-    NSURL *url = [NSURL URLWithString:urlString];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setValue:@"Bearer YOUR_API_KEY" forHTTPHeaderField:@"Authorization"]; // Set your CurseForge API key here
-    
-    NSURLSession *session = [NSURLSession sharedSession];
-    NSURLSessionDataTask *dataTask = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
-        if (error) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                showDialog(localize(@"Error", nil), error.localizedDescription);
-                [self actionClose];
-            });
-            return;
-        }
-
-        NSError *jsonError;
-        NSDictionary *jsonResponse = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-        
-        if (jsonError) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                showDialog(localize(@"Error", nil), jsonError.localizedDescription);
-                [self actionClose];
-            });
-            return;
-        }
-
-        NSArray *modpacks = jsonResponse[@"data"];
-        self.list = [modpacks mutableCopy];
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.list) {
-                [self switchToReadyState];
-                [self.tableView reloadData];
-            } else {
-                showDialog(localize(@"Error", nil), @"No modpacks found.");
-                [self actionClose];
-            }
-        });
-    }];
-    
-    [dataTask resume];
-}
-
 - (void)updateSearchResults {
     [self loadSearchResultsWithPrevList:NO];
 }
@@ -124,6 +70,10 @@
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateSearchResults) object:nil];
     [self performSelector:@selector(updateSearchResults) withObject:nil afterDelay:0.5];
+}
+
+- (void)actionClose {
+    [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)switchToLoadingState {
@@ -151,6 +101,15 @@
     }];
 }
 
+- (_UIContextMenuStyle *)_contextMenuInteraction:(UIContextMenuInteraction *)interaction styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration
+{
+    _UIContextMenuStyle *style = [_UIContextMenuStyle defaultStyle];
+    style.preferredLayout = 3; // _UIContextMenuLayoutCompactMenu
+    return style;
+}
+
+#pragma mark UITableViewDataSource
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 1;
 }
@@ -168,12 +127,65 @@
     }
 
     NSDictionary *item = self.list[indexPath.row];
-    cell.textLabel.text = item[@"name"] ?: item[@"title"];
+    cell.textLabel.text = item[@"title"];
     cell.detailTextLabel.text = item[@"description"];
     UIImage *fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     [cell.imageView setImageWithURL:[NSURL URLWithString:item[@"imageUrl"]] placeholderImage:fallbackImage];
 
+    if (!self.modrinth.reachedLastPage && indexPath.row == self.list.count-1) {
+        [self loadSearchResultsWithPrevList:YES];
+    }
+
     return cell;
+}
+
+- (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+
+    NSMutableArray<UIAction *> *menuItems = [[NSMutableArray alloc] init];
+    [details[@"versionNames"] enumerateObjectsUsingBlock:
+    ^(NSString *name, NSUInteger i, BOOL *stop) {
+        NSString *nameWithVersion = name;
+        NSString *mcVersion = details[@"mcVersionNames"][i];
+        if (![name hasSuffix:mcVersion]) {
+            nameWithVersion = [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
+        }
+        [menuItems addObject:[UIAction
+            actionWithTitle:nameWithVersion
+            image:nil identifier:nil
+            handler:^(UIAction *action) {
+            [self actionClose];
+            NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
+                [UIImagePNGRepresentation([cell.imageView.image _imageWithSize:CGSizeMake(40, 40)]) writeToFile:tmpIconPath atomically:YES];
+            [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
+        }]];
+    }];
+
+    self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
+    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
+    cell.detailTextLabel.interactions = @[interaction];
+    [interaction _presentMenuAtLocation:CGPointZero];
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *item = self.list[indexPath.row];
+    if ([item[@"versionDetailsLoaded"] boolValue]) {
+        [self showDetails:item atIndexPath:indexPath];
+        return;
+    }
+    [tableView deselectRowAtIndexPath:indexPath animated:NO];
+    [self switchToLoadingState];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [self.modrinth loadDetailsOfMod:self.list[indexPath.row]];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self switchToReadyState];
+            if ([item[@"versionDetailsLoaded"] boolValue]) {
+                [self showDetails:item atIndexPath:indexPath];
+            } else {
+                showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+            }
+        });
+    });
 }
 
 @end
