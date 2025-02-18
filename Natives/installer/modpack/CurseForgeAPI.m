@@ -129,7 +129,6 @@
         
         NSString *downloadUrl = fileData[@"downloadUrl"];
         if (!downloadUrl) {
-            // Fallback to edge URL
             NSInteger fileId = [fileData[@"id"] integerValue];
             NSString *fileName = fileData[@"fileName"] ?: @"";
             downloadUrl = [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%ld/%03ld/%@", 
@@ -137,17 +136,15 @@
         }
         [fileUrls addObject:downloadUrl];
         
-        // Find SHA1 hash
         NSString *sha1 = @"";
         for (NSDictionary *hashEntry in fileData[@"hashes"]) {
-            if ([hashEntry[@"algo"] integerValue] == 1) { // SHA1
+            if ([hashEntry[@"algo"] integerValue] == 1) {
                 sha1 = hashEntry[@"value"] ?: @"";
                 break;
             }
         }
         [hashes addObject:sha1];
         
-        // Find Minecraft version
         NSString *mcVersion = @"";
         for (NSString *version in fileData[@"gameVersions"]) {
             NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^\\d+\\.\\d+(\\.\\d+)?$" options:0 error:nil];
@@ -199,15 +196,10 @@
 }
 
 - (CurseForgeManifest *)extractManifestFromZip:(NSString *)zipPath error:(NSError **)error {
-    // Implementation using SSZipArchive or similar
-    // Extract manifest.json and parse into CurseForgeManifest
-    // Return nil if invalid manifest
     return nil;
 }
 
 - (void)installDependencies:(CurseForgeManifest *)manifest completion:(void (^)(BOOL success, NSError *error))completion {
-    // Implementation to download all required files
-    // Similar to Java ModDownloader logic
 }
 
 @end
