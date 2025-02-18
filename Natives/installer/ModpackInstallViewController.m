@@ -11,10 +11,6 @@
 #import "utils.h"
 #include <dlfcn.h>
 
-#define kCurseForgeGameIDMinecraft 432
-#define kCurseForgeClassIDModpack 4471
-#define kCurseForgeClassIDMod 6
-
 @interface ModpackInstallViewController () <UIContextMenuInteractionDelegate, UISearchResultsUpdating, UITableViewDataSource, UITableViewDelegate>
 @property(nonatomic) UISearchController *searchController;
 @property(nonatomic) UISegmentedControl *sourceSegmentedControl;
@@ -29,19 +25,24 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    
+    // Setup search controller
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
+    // Setup source selector
     self.sourceSegmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
     self.sourceSegmentedControl.selectedSegmentIndex = 0;
     [self.sourceSegmentedControl addTarget:self action:@selector(sourceChanged:) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.sourceSegmentedControl;
     
+    // Initialize APIs
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] init];
     
+    // Setup initial filters
     self.filters = [@{
         @"isModpack": @(YES),
         @"name": @" "
@@ -149,7 +150,7 @@
     cell.detailTextLabel.text = item[@"description"];
     
     UIImage *fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    cell.imageView.image = fallbackImage;  // Removed SDWebImage, using local fallback image instead
+    cell.imageView.image = fallbackImage;
     
     if (self.sourceSegmentedControl.selectedSegmentIndex == 0 && !self.modrinth.reachedLastPage && indexPath.row == self.list.count - 1) {
         [self loadSearchResultsWithPrevList:YES];
@@ -162,6 +163,7 @@
 
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+    
     NSMutableArray<UIAction *> *menuItems = [[NSMutableArray alloc] init];
     [details[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *nameWithVersion = name;
@@ -169,7 +171,10 @@
         if (![name hasSuffix:mcVersion]) {
             nameWithVersion = [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
         }
-        [menuItems addObject:[UIAction actionWithTitle:nameWithVersion image:nil identifier:nil handler:^(UIAction *action) {
+        [menuItems addObject:[UIAction actionWithTitle:nameWithVersion 
+                                               image:nil 
+                                             identifier:nil 
+                                           handler:^(UIAction *action) {
             [self actionClose];
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             [UIImagePNGRepresentation([cell.imageView.image _imageWithSize:CGSizeMake(40, 40)]) writeToFile:tmpIconPath atomically:YES];
@@ -188,6 +193,8 @@
     self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
     UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
     cell.detailTextLabel.interactions = @[interaction];
+    
+    // Using private API as requested
     [interaction _presentMenuAtLocation:CGPointZero];
 }
 
