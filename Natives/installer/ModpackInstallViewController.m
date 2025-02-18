@@ -175,7 +175,7 @@
     }
     [tableView deselectRowAtIndexPath:indexPath animated:NO];
     [self switchToLoadingState];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         [self.modrinth loadDetailsOfMod:self.list[indexPath.row]];
         dispatch_async(dispatch_get_main_queue(), ^{
             [self switchToReadyState];
