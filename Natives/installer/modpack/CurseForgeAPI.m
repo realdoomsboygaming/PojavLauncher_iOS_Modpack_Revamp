@@ -107,6 +107,8 @@ static const NSInteger kCurseForgeClassIDMod = 6;
             @"description": modData[@"summary"] ?: @"",
             @"imageUrl": modData[@"logo"] ? modData[@"logo"][@"thumbnailUrl"] : @""
         } mutableCopy];
+        
+        [self loadDetailsOfMod:item]; // Critical version data loading
         [results addObject:item];
     }
     
@@ -155,10 +157,49 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 }
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@", item[@"id"]] params:nil];
-    if (!response) return;
+    NSString *modId = item[@"id"];
+    if (!modId) return;
     
-    // Add implementation for loading mod details here
+    NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@", modId] params:nil];
+    if (!response || !response[@"data"]) return;
+    
+    NSArray *files = response[@"data"][@"latestFiles"];
+    if (!files || ![files isKindOfClass:[NSArray class]]) return;
+
+    NSMutableArray *versionNames = [NSMutableArray array];
+    NSMutableArray *mcVersionNames = [NSMutableArray array];
+    NSMutableArray *versionUrls = [NSMutableArray array];
+    
+    for (NSDictionary *file in files) {
+        // Version name
+        NSString *displayName = file[@"displayName"] ?: @"";
+        [versionNames addObject:displayName];
+        
+        // Minecraft version
+        NSArray *gameVersions = file[@"gameVersions"];
+        NSString *mcVersion = (gameVersions.count > 0) ? gameVersions.firstObject : @"";
+        [mcVersionNames addObject:mcVersion];
+        
+        // Download URL
+        NSString *fileId = [file[@"id"] stringValue];
+        NSString *downloadUrl = file[@"downloadUrl"];
+        
+        if (!downloadUrl || [downloadUrl isEqualToString:@""]) {
+            // Construct URL if not provided
+            if (fileId.length >= 4) {
+                downloadUrl = [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%@/%@/%@",
+                             [fileId substringToIndex:4],
+                             [fileId substringWithRange:NSMakeRange(4, 2)],
+                             file[@"fileName"]];
+            }
+        }
+        
+        [versionUrls addObject:downloadUrl ?: @""];
+    }
+    
+    item[@"versionNames"] = versionNames;
+    item[@"mcVersionNames"] = mcVersionNames;
+    item[@"versionUrls"] = versionUrls;
 }
 
 @end
