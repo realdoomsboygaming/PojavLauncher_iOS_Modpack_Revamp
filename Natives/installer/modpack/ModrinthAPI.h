@@ -1,8 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "MinecraftResourceDownloadTask.h"
-#import <AFNetworking/AFHTTPSessionManager.h>
 
-@interface ModrinthAPI : AFHTTPSessionManager
+@interface ModrinthAPI : NSObject
 
 @property (nonatomic) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
