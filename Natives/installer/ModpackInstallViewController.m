@@ -51,6 +51,13 @@
     [self updateSearchResults];
 }
 
+#pragma mark - Context Menu Delegate
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+        return self.currentMenu;
+    }];
+}
+
 #pragma mark - Search Handling
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateSearchResults) object:nil];
@@ -153,7 +160,7 @@
     }];
     
     self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
-    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:(id<UIContextMenuInteractionDelegate>)self];
+    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
     [cell.detailTextLabel addInteraction:interaction];
     [interaction performSelector:@selector(_presentMenuAtLocation:) withObject:[NSValue valueWithCGPoint:CGPointZero]];
 }
