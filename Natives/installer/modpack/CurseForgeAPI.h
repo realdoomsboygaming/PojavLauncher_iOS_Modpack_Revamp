@@ -8,6 +8,7 @@
 @property (nonatomic, assign) NSInteger previousOffset;
 
 - (instancetype)init;
+- (instancetype)initWithAPIKey:(NSString *)apiKey;
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters previousPageResult:(NSMutableArray *)previousResults;
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item;
