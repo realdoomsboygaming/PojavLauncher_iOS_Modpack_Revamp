@@ -164,8 +164,8 @@
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     
-    // Clear existing interactions
-    for (UIInteraction *interaction in cell.interactions) {
+    // Fixed interaction removal using dynamic typing
+    for (id interaction in cell.interactions) {
         [cell removeInteraction:interaction];
     }
     
