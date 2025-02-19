@@ -60,10 +60,8 @@
     
     [response enumerateObjectsUsingBlock:^(NSDictionary *version, NSUInteger i, BOOL *stop) {
         NSDictionary *file = [version[@"files"] firstObject];
-        // Append the first game version
         NSString *gameVersion = [version[@"game_versions"] firstObject];
         [mcNames addObject:(gameVersion ? gameVersion : @"")];
-        // Append file size, URL, and SHA1 hash (or placeholder)
         NSString *size = file[@"size"];
         [sizes addObject:(size ? size : @"")];
         NSString *url = file[@"url"];
@@ -90,7 +88,7 @@
     }
     
     NSData *indexData = [archive extractDataFromFile:@"modrinth.index.json" error:&error];
-    NSDictionary* indexDict = [NSJSONSerialization JSONObjectWithData:indexData options:kNilOptions error:&error];
+    NSDictionary *indexDict = [NSJSONSerialization JSONObjectWithData:indexData options:kNilOptions error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to parse modrinth.index.json: %@", error.localizedDescription]];
         return;
@@ -131,26 +129,22 @@
         return;
     }
     
-    // Delete package cache
     [NSFileManager.defaultManager removeItemAtPath:packagePath error:nil];
     
-    // Download dependency client json (if available)
     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:indexDict[@"dependencies"]];
     if (depInfo[@"json"]) {
         NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:0 sha:nil altName:nil toPath:jsonPath];
         [task resume];
     }
-    // TODO: automation for Forge
     
-    // Create profile
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     PLProfiles.current.profiles[indexDict[@"name"]] = @{
         @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
         @"name": indexDict[@"name"],
         @"lastVersionId": depInfo[@"id"],
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@",
-            [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
+                  [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
     }.mutableCopy;
     PLProfiles.current.selectedProfileName = indexDict[@"name"];
 }
