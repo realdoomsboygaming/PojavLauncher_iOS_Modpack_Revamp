@@ -89,7 +89,9 @@
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text;
-    if (!prevList && [self.filters[@"name"] isEqualToString:name]) return;
+    NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]] ? self.filters[@"name"] : @"");
+    if (!prevList && [previousName isEqualToString:name]) return;
+
     
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
