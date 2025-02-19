@@ -2,7 +2,8 @@
 #import "modpack/ModrinthAPI.h"
 #import "modpack/CurseForgeAPI.h"
 
-@interface ModpackInstallViewController : UITableViewController <UISearchResultsUpdating, UIContextMenuInteractionDelegate>
+@interface ModpackInstallViewController : UITableViewController
+    <UISearchResultsUpdating, UIContextMenuInteractionDelegate>
 
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UIMenu *currentMenu;
@@ -12,6 +13,7 @@
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) UISegmentedControl *apiSegmentControl;
 
+/// Force an update of the search results
 - (void)updateSearchResults;
 
 @end
