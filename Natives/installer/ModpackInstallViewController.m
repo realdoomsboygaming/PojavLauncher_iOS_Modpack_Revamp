@@ -8,7 +8,7 @@
 #import "modpack/CurseForgeAPI.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#include <dlfcn.h>
+#include <dlfcn.h> // Corrected syntax
 
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
@@ -34,10 +34,7 @@
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
-    // Initialize Modrinth API normally.
     self.modrinth = [ModrinthAPI new];
-    
-    // If an API key is already saved, initialize the CurseForgeAPI.
     NSString *key = [self loadAPIKey];
     if (key.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
@@ -69,7 +66,6 @@
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Enter API Key" message:@"Please enter your CurseForge API key:" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"API Key";
-        // Optionally set secureTextEntry if you want to hide input:
         textField.secureTextEntry = YES;
     }];
     
@@ -80,10 +76,8 @@
             [[NSUserDefaults standardUserDefaults] setObject:enteredKey forKey:@"CURSEFORGE_API_KEY"];
             [[NSUserDefaults standardUserDefaults] synchronize];
             self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:enteredKey];
-            // Optionally refresh search results after key is saved.
             [self updateSearchResults];
         } else {
-            // If empty, prompt again.
             [self promptForAPIKey];
         }
     }];
