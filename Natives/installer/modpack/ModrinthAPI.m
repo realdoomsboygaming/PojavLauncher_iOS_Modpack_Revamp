@@ -1,10 +1,10 @@
 #import "ModrinthAPI.h"
-#import "ModrinthAPI.h"
 #import "PLProfiles.h"
 
 @implementation ModrinthAPI {
     BOOL reachedLastPage;
     NSString *lastSearchTerm;
+    NSError *lastError;
 }
 
 - (instancetype)init {
@@ -32,6 +32,7 @@
     
     NSDictionary *response = [self getEndpoint:@"search" params:params];
     if (!response) {
+        self.lastError = [NSError errorWithDomain:@"ModrinthAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed to fetch results"}];
         return nil;
     }
     
@@ -39,7 +40,7 @@
     for (NSDictionary *hit in response[@"hits"]) {
         BOOL isModpack = [hit[@"project_type"] isEqualToString:@"modpack"];
         [result addObject:@{
-            @"apiSource": @(1), // Constant MODRINTH
+            @"apiSource": @(1),
             @"isModpack": @(isModpack),
             @"id": hit[@"project_id"],
             @"title": hit[@"title"],
@@ -114,7 +115,7 @@
         } else if (!downloader.progress.cancelled) {
             downloader.progress.completedUnitCount++;
         } else {
-            return; // cancelled
+            return;
         }
     }
     
@@ -141,7 +142,7 @@
     
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     PLProfiles.current.profiles[indexDict[@"name"]] = @{
-        @"gameDir": [NSString stringWithFormat="./custom_gamedir/%@", destPath.lastPathComponent],
+        @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
         @"name": indexDict[@"name"],
         @"lastVersionId": depInfo[@"id"],
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@",
