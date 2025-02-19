@@ -5,7 +5,7 @@
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
 #import "modpack/ModrinthAPI.h"
-#import "modpack/CurseForgeAPI.h"
+#import "modpack/CurseForgeAPI.h" 
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #include <dlfcn.h>
@@ -19,6 +19,7 @@
 @property (nonatomic) UIMenu *currentMenu;
 @property (nonatomic) NSMutableArray *list;
 @property (nonatomic) NSMutableDictionary *filters;
+// Support for both APIs
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic) UISegmentedControl *apiSegmentControl;
@@ -29,16 +30,19 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
+    // Set up the search controller.
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
-    self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:[self loadAPIKey]];
+    // Initialize both APIs.
+    self.curseForge = [[CurseForgeAPI alloc] init];
     self.modrinth = [ModrinthAPI new];
     
+    // Set up a segmented control to switch between CurseForge and Modrinth.
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
-    self.apiSegmentControl.selectedSegmentIndex = 0;
+    self.apiSegmentControl.selectedSegmentIndex = 0; // Default to CurseForge.
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
     [self.apiSegmentControl addTarget:self action:@selector(apiSegmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
@@ -47,16 +51,8 @@
     [self updateSearchResults];
 }
 
-- (NSString *)loadAPIKey {
-    NSDictionary *environment = [[NSProcessInfo processInfo] environment];
-    NSString *apiKey = environment[@"CURSEFORGE_API_KEY"];
-    if (!apiKey || [apiKey length] == 0) {
-        NSLog(@"⚠️ WARNING: CurseForge API key is missing! Add CURSEFORGE_API_KEY to environment variables.");
-    }
-    return apiKey;
-}
-
 - (void)apiSegmentChanged:(UISegmentedControl *)sender {
+    // When switching APIs, reset the list and offsets, then refresh results.
     self.list = [NSMutableArray new];
     self.curseForge.previousOffset = 0;
     [self updateSearchResults];
@@ -72,8 +68,10 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.filters[@"name"] = name;
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+            // Use CurseForge API.
             self.list = [self.curseForge searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
         } else {
+            // Use Modrinth API.
             self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -118,6 +116,22 @@
     self.tableView.allowsSelection = YES;
 }
 
+#pragma mark - UIContextMenu Interaction
+
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+        return self.currentMenu;
+    }];
+}
+
+- (_UIContextMenuStyle *)_contextMenuInteraction:(UIContextMenuInteraction *)interaction styleForMenuWithConfiguration:(UIContextMenuConfiguration *)configuration {
+    _UIContextMenuStyle *style = [_UIContextMenuStyle defaultStyle];
+    style.preferredLayout = 3; // Compact menu layout.
+    return style;
+}
+
+#pragma mark - UITableViewDataSource
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 1;
 }
@@ -148,6 +162,60 @@
     }
     
     return cell;
+}
+
+- (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+    
+    NSMutableArray<UIAction *> *menuItems = [NSMutableArray array];
+    [details[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
+        NSString *nameWithVersion = name;
+        NSString *mcVersion = details[@"mcVersionNames"][i];
+        if (![name hasSuffix:mcVersion]) {
+            nameWithVersion = [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
+        }
+        [menuItems addObject:[UIAction actionWithTitle:nameWithVersion image:nil identifier:nil handler:^(UIAction *action) {
+            [self actionClose];
+            NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
+            [UIImagePNGRepresentation([cell.imageView.image _imageWithSize:CGSizeMake(40, 40)]) writeToFile:tmpIconPath atomically:YES];
+            if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+                [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i];
+            } else {
+                [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
+            }
+        }]];
+    }];
+    
+    self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
+    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
+    cell.detailTextLabel.interactions = @[interaction];
+    [interaction _presentMenuAtLocation:CGPointZero];
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *item = self.list[indexPath.row];
+    if ([item[@"versionDetailsLoaded"] boolValue]) {
+        [self showDetails:item atIndexPath:indexPath];
+        return;
+    }
+    [tableView deselectRowAtIndexPath:indexPath animated:NO];
+    [self switchToLoadingState];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+            [self.curseForge loadDetailsOfMod:self.list[indexPath.row]];
+        } else {
+            [self.modrinth loadDetailsOfMod:self.list[indexPath.row]];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self switchToReadyState];
+            if ([item[@"versionDetailsLoaded"] boolValue]) {
+                [self showDetails:item atIndexPath:indexPath];
+            } else {
+                showDialog(localize(@"Error", nil),
+                           self.apiSegmentControl.selectedSegmentIndex == 0 ? self.curseForge.lastError.localizedDescription : self.modrinth.lastError.localizedDescription);
+            }
+        });
+    });
 }
 
 @end
