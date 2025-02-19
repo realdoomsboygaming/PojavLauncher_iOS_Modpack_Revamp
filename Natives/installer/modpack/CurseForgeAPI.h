@@ -3,6 +3,7 @@
 
 @interface CurseForgeAPI : ModpackAPI
 
+@property (nonatomic, strong) NSString *apiKey;
 @property (nonatomic, strong) NSError *lastError;
 @property (nonatomic, assign) BOOL reachedLastPage;
 @property (nonatomic, assign) NSInteger previousOffset;
