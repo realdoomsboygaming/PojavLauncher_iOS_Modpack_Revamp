@@ -79,10 +79,13 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     int limit = 50;
     params[@"pageSize"] = @(limit);
     
-    if (!previousResults || ![searchFilters[@"name"] isEqualToString:self.lastSearchTerm]) {
+    NSString *searchFilterName = ([searchFilters[@"name"] isKindOfClass:[NSString class]] ? searchFilters[@"name"] : @"");
+    NSString *lastSearchName = ([self.lastSearchTerm isKindOfClass:[NSString class]] ? self.lastSearchTerm : @"");
+    if (!previousResults || ![searchFilterName isEqualToString:lastSearchName]) {
         self.previousOffset = 0;
         self.reachedLastPage = NO;
     }
+
     
     params[@"index"] = @(self.previousOffset);
     
