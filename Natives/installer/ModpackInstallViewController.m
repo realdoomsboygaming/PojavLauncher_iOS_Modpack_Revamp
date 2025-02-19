@@ -51,8 +51,27 @@
     [self updateSearchResults];
 }
 
+#pragma mark - Segment Control Handler
+- (void)apiSegmentChanged:(UISegmentedControl *)sender {
+    [self.list removeAllObjects];
+    [self.tableView reloadData];
+    [self updateSearchResults];
+}
+
 #pragma mark - Context Menu Delegate
 - (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+        return self.currentMenu;
+    }];
+}
+
+#pragma mark - TableView Delegate
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    [self showDetails:self.list[indexPath.row] atIndexPath:indexPath];
+}
+
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
         return self.currentMenu;
     }];
@@ -110,6 +129,10 @@
         cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
         cell.imageView.clipsToBounds = YES;
         cell.imageView.frame = CGRectMake(0, 0, 60, 60);
+        
+        // Add context menu interaction to new cells
+        UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
+        [cell addInteraction:interaction];
     }
     
     NSDictionary *item = self.list[indexPath.row];
@@ -140,6 +163,12 @@
 #pragma clang diagnostic ignored "-Wundeclared-selector"
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+    
+    // Clear existing interactions
+    for (UIInteraction *interaction in cell.interactions) {
+        [cell removeInteraction:interaction];
+    }
+    
     NSMutableArray<UIAction *> *menuItems = [NSMutableArray new];
     
     [details[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
@@ -161,7 +190,7 @@
     
     self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
     UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
-    [cell.detailTextLabel addInteraction:interaction];
+    [cell addInteraction:interaction];
     [interaction performSelector:@selector(_presentMenuAtLocation:) withObject:[NSValue valueWithCGPoint:CGPointZero]];
 }
 #pragma clang diagnostic pop
