@@ -1,6 +1,7 @@
 #import "CurseForgeAPI.h"
 #import "UZKArchive.h"
 #import "AFNetworking.h"
+#import "utils.h"
 
 static const NSInteger kCurseForgeGameIDMinecraft = 432;
 static const NSInteger kCurseForgeClassIDModpack = 4471;
@@ -102,31 +103,35 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     NSString *destPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"modpack_install"];
     [[NSFileManager defaultManager] createDirectoryAtPath:destPath withIntermediateDirectories:YES attributes:nil error:nil];
     
-    NSData *zipData = [NSData dataWithContentsOfURL:zipUrl];
-    if (!zipData) {
-        NSLog(@"Failed to download modpack zip");
-        return;
-    }
-    
     NSString *zipPath = [destPath stringByAppendingPathComponent:@"modpack.zip"];
-    [zipData writeToFile:zipPath atomically:YES];
+    NSURLSessionDownloadTask *downloadTask = [[NSURLSession sharedSession] downloadTaskWithURL:zipUrl 
+        completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+            if (error) {
+                NSLog(@"Download failed: %@", error.localizedDescription);
+                return;
+            }
+            
+            [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
+            
+            NSError *archiveError = nil;
+            UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&archiveError];
+            if (archiveError) {
+                NSLog(@"Failed to open modpack package: %@", archiveError.localizedDescription);
+                return;
+            }
+            
+            [archive extractFilesTo:destPath overwrite:YES error:&archiveError];
+            if (archiveError) {
+                NSLog(@"Failed to extract modpack: %@", archiveError.localizedDescription);
+                return;
+            }
+            
+            [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+            
+            NSLog(@"Modpack installed successfully from CurseForge.");
+        }];
     
-    NSError *error = nil;
-    UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&error];
-    if (error) {
-        NSLog(@"Failed to open modpack package: %@", error.localizedDescription);
-        return;
-    }
-    
-    [archive extractFilesTo:destPath overwrite:YES error:&error];
-    if (error) {
-        NSLog(@"Failed to extract modpack: %@", error.localizedDescription);
-        return;
-    }
-    
-    [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
-    
-    NSLog(@"Modpack installed successfully from CurseForge.");
+    [downloadTask resume];
 }
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
