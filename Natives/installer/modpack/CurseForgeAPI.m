@@ -1,7 +1,7 @@
 #import "CurseForgeAPI.h"
 #import "utils.h"
 #import "UZKArchive.h"
-#import "ModpackUtils.h" 
+#import "ModpackUtils.h"
 
 static const NSInteger kCurseForgeGameIDMinecraft = 432;
 static const NSInteger kCurseForgeClassIDModpack = 4471;
@@ -9,13 +9,11 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 
 @implementation CurseForgeAPI
 
-- (instancetype)initWithAPIKey:(NSString *)apiKeyVal {
-    self = [super initWithBaseURL:[NSURL URLWithString:@"https://api.curseforge.com/v1"]];
+- (instancetype)initWithAPIKey:(NSString *)apiKey {
+    self = [super init];
     if (self) {
-        _apiKey = apiKeyVal; // Use synthesized ivar
+        _apiKey = apiKey;
         _previousOffset = 0;
-        self.requestSerializer = [AFJSONRequestSerializer serializer];
-        [self.requestSerializer setValue:_apiKey forHTTPHeaderField:@"x-api-key"];
     }
     return self;
 }
@@ -23,7 +21,7 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 - (NSString *)loadAPIKey {
     NSDictionary *environment = [[NSProcessInfo processInfo] environment];
     NSString *envKey = environment[@"CURSEFORGE_API_KEY"];
-    if (!envKey || [envKey length] == 0) { // Rename local variable
+    if (!envKey || envKey.length == 0) {
         NSLog(@"⚠️ WARNING: CurseForge API key missing!");
     }
     return envKey;
@@ -31,25 +29,41 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
     __block id result;
-    dispatch_group_t group = dispatch_group_create();
-    dispatch_group_enter(group);
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
     
-    NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
-    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    [manager.requestSerializer setValue:self.apiKey forHTTPHeaderField:@"x-api-key"];
-    [manager.requestSerializer setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
+    NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.curseforge.com/v1/%@", endpoint]];
+    components.queryItems = [self queryItemsFromParams:params];
     
-    [manager GET:url parameters:params headers:nil progress:nil
-         success:^(NSURLSessionTask *task, id responseObject) {
-             result = responseObject;
-             dispatch_group_leave(group);
-         } failure:^(NSURLSessionTask *operation, NSError *error) {
-             self.lastError = error;
-             dispatch_group_leave(group);
-         }];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
+    [request setValue:self.apiKey forHTTPHeaderField:@"x-api-key"];
+    [request setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
     
-    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) {
+            self.lastError = error;
+            dispatch_semaphore_signal(semaphore);
+            return;
+        }
+        
+        NSError *jsonError;
+        result = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:&jsonError];
+        if (jsonError) {
+            self.lastError = jsonError;
+        }
+        dispatch_semaphore_signal(semaphore);
+    }];
+    
+    [task resume];
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
     return result;
+}
+
+- (NSArray<NSURLQueryItem *> *)queryItemsFromParams:(NSDictionary *)params {
+    NSMutableArray *queryItems = [NSMutableArray array];
+    for (NSString *key in params) {
+        [queryItems addObject:[NSURLQueryItem queryItemWithName:key value:[NSString stringWithFormat:@"%@", params[key]]]];
+    }
+    return queryItems;
 }
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters previousPageResult:(NSMutableArray *)previousResults {
@@ -65,7 +79,6 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     int limit = 50;
     params[@"pageSize"] = @(limit);
     
-    // Reset offset if this is a new search
     if (!previousResults || ![searchFilters[@"name"] isEqualToString:self.lastSearchTerm]) {
         self.previousOffset = 0;
         self.reachedLastPage = NO;
@@ -78,17 +91,11 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     }
     
     NSDictionary *response = [self getEndpoint:@"mods/search" params:params];
-    if (!response) {
-        return nil;
-    }
+    if (!response) return nil;
     
     NSArray *dataArray = response[@"data"];
     NSMutableArray *results = previousResults ? previousResults : [NSMutableArray array];
-    
-    // Update offset for next page
     self.previousOffset += dataArray.count;
-    
-    // Check if we've reached the end
     self.reachedLastPage = dataArray.count < limit;
     
     for (NSDictionary *modData in dataArray) {
@@ -119,44 +126,39 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     [[NSFileManager defaultManager] createDirectoryAtPath:destPath withIntermediateDirectories:YES attributes:nil error:nil];
     
     NSString *zipPath = [destPath stringByAppendingPathComponent:@"modpack.zip"];
-    NSURLSessionDownloadTask *downloadTask = [[NSURLSession sharedSession] downloadTaskWithURL:zipUrl 
-        completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
-            if (error) {
-                NSLog(@"Download failed: %@", error.localizedDescription);
-                return;
-            }
-            
-            [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
-            
-            NSError *archiveError = nil;
-            UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&archiveError];
-            if (archiveError) {
-                NSLog(@"Failed to open modpack package: %@", archiveError.localizedDescription);
-                return;
-            }
-            
-            [archive extractFilesTo:destPath overwrite:YES error:&archiveError];
-            if (archiveError) {
-                NSLog(@"Failed to extract modpack: %@", archiveError.localizedDescription);
-                return;
-            }
-            
-            [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
-            
-            NSLog(@"Modpack installed successfully from CurseForge.");
-        }];
+    NSURLSessionDownloadTask *downloadTask = [[NSURLSession sharedSession] downloadTaskWithURL:zipUrl completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        if (error) {
+            NSLog(@"Download failed: %@", error.localizedDescription);
+            return;
+        }
+        
+        [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
+        
+        NSError *archiveError = nil;
+        UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&archiveError];
+        if (archiveError) {
+            NSLog(@"Failed to open modpack package: %@", archiveError.localizedDescription);
+            return;
+        }
+        
+        [archive extractFilesTo:destPath overwrite:YES error:&archiveError];
+        if (archiveError) {
+            NSLog(@"Failed to extract modpack: %@", archiveError.localizedDescription);
+            return;
+        }
+        
+        [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+        NSLog(@"Modpack installed successfully from CurseForge.");
+    }];
     
     [downloadTask resume];
 }
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
     NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@", item[@"id"]] params:nil];
-    if (!response) {
-        return;
-    }
+    if (!response) return;
     
-    // Add implementation for loading mod details
-    // Similar to ModrinthAPI's implementation but adapted for CurseForge's API structure
+    // Add implementation for loading mod details here
 }
 
 @end
