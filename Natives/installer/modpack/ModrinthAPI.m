@@ -1,52 +1,10 @@
 #import "ModrinthAPI.h"
+#import "MinecraftResourceDownloadTask.h"
 #import "PLProfiles.h"
-#import "UZKArchive.h"
 #import "ModpackUtils.h"
+#import "UZKArchive.h"
 
 @implementation ModrinthAPI
-
-- (instancetype)init {
-    self = [super init];
-    return self;
-}
-
-- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
-    __block id result;
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    
-    NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.modrinth.com/v2/%@", endpoint]];
-    components.queryItems = [self queryItemsFromParams:params];
-    
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
-    [request setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
-    
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error) {
-            self.lastError = error;
-            dispatch_semaphore_signal(semaphore);
-            return;
-        }
-        
-        NSError *jsonError;
-        result = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:&jsonError];
-        if (jsonError) {
-            self.lastError = jsonError;
-        }
-        dispatch_semaphore_signal(semaphore);
-    }];
-    
-    [task resume];
-    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-    return result;
-}
-
-- (NSArray<NSURLQueryItem *> *)queryItemsFromParams:(NSDictionary *)params {
-    NSMutableArray *queryItems = [NSMutableArray array];
-    for (NSString *key in params) {
-        [queryItems addObject:[NSURLQueryItem queryItemWithName:key value:[NSString stringWithFormat:@"%@", params[key]]]];
-    }
-    return queryItems;
-}
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)modrinthSearchResult {
     int limit = 50;
@@ -68,10 +26,7 @@
     };
     
     NSDictionary *response = [self getEndpoint:@"search" params:params];
-    if (!response) {
-        self.lastError = [NSError errorWithDomain:@"ModrinthAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Failed to fetch results"}];
-        return nil;
-    }
+    if (!response) return nil;
     
     NSMutableArray *result = modrinthSearchResult ?: [NSMutableArray new];
     for (NSDictionary *hit in response[@"hits"]) {
@@ -85,9 +40,7 @@
             @"imageUrl": hit[@"icon_url"]
         }.mutableCopy];
     }
-    
     self.reachedLastPage = result.count >= [response[@"total_hits"] unsignedLongValue];
-    self.lastSearchTerm = searchFilters[@"name"];
     return result;
 }
 
@@ -103,15 +56,12 @@
     
     [response enumerateObjectsUsingBlock:^(NSDictionary *version, NSUInteger i, BOOL *stop) {
         NSDictionary *file = [version[@"files"] firstObject];
-        NSString *gameVersion = [version[@"game_versions"] firstObject];
-        [mcNames addObject:(gameVersion ? gameVersion : @"")];
-        NSString *size = file[@"size"];
-        [sizes addObject:(size ? size : @"")];
-        NSString *url = file[@"url"];
-        [urls addObject:(url ? url : @"")];
+        NSString *gameVersion = [version[@"game_versions"] firstObject] ?: @"";
+        [mcNames addObject:gameVersion];
+        [sizes addObject:file[@"size"] ?: @0];
+        [urls addObject:file[@"url"] ?: @""];
         NSDictionary *hashesMap = file[@"hashes"];
-        NSString *sha1 = hashesMap[@"sha1"];
-        [hashes addObject:(sha1 ? sha1 : [NSNull null])];
+        [hashes addObject:hashesMap[@"sha1"] ?: [NSNull null]];
     }];
     
     item[@"versionNames"] = names;
@@ -122,6 +72,23 @@
     item[@"versionDetailsLoaded"] = @(YES);
 }
 
+- (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
+    NSString *packageUrl = detail[@"versionUrls"][index];
+    NSString *destPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"modrinth_install"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:destPath withIntermediateDirectories:YES attributes:nil error:nil];
+    
+    NSURLSessionDownloadTask *task = [[NSURLSession sharedSession] downloadTaskWithURL:[NSURL URLWithString:packageUrl] completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        if (error) return;
+        
+        NSString *packagePath = [destPath stringByAppendingPathComponent:@"modpack.mrpack"];
+        [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:packagePath] error:nil];
+        
+        MinecraftResourceDownloadTask *downloader = [MinecraftResourceDownloadTask new];
+        [self downloader:downloader submitDownloadTasksFromPackage:packagePath toPath:destPath];
+    }];
+    [task resume];
+}
+
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     NSError *error;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
@@ -129,14 +96,14 @@
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to open modpack package: %@", error.localizedDescription]];
         return;
     }
-    
+
     NSData *indexData = [archive extractDataFromFile:@"modrinth.index.json" error:&error];
-    NSDictionary *indexDict = [NSJSONSerialization JSONObjectWithData:indexData options:kNilOptions error:&error];
+    NSDictionary* indexDict = [NSJSONSerialization JSONObjectWithData:indexData options:kNilOptions error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to parse modrinth.index.json: %@", error.localizedDescription]];
         return;
     }
-    
+
     downloader.progress.totalUnitCount = [indexDict[@"files"] count];
     for (NSDictionary *indexFile in indexDict[@"files"]) {
         NSString *url = [indexFile[@"downloads"] firstObject];
@@ -147,39 +114,38 @@
         if (task) {
             [downloader.fileList addObject:indexFile[@"path"]];
             [task resume];
-        } else if (!downloader.progress.cancelled) {
-            downloader.progress.completedUnitCount++;
         }
     }
-    
+
     [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", error.localizedDescription]];
         return;
     }
-    
+
     [ModpackUtils archive:archive extractDirectory:@"client-overrides" toPath:destPath error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract client-overrides: %@", error.localizedDescription]];
         return;
     }
-    
+
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-    
+
     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:indexDict[@"dependencies"]];
     if (depInfo[@"json"]) {
         NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:0 sha:nil altName:nil toPath:jsonPath];
         [task resume];
     }
-    
+
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     PLProfiles.current.profiles[indexDict[@"name"]] = @{
         @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
         @"name": indexDict[@"name"],
         @"lastVersionId": depInfo[@"id"],
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@",
-                  [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
+                 [[NSData dataWithContentsOfFile:tmpIconPath]
+                 base64EncodedStringWithOptions:0]]
     }.mutableCopy;
     PLProfiles.current.selectedProfileName = indexDict[@"name"];
 }
