@@ -46,7 +46,7 @@
     self.navigationItem.titleView = self.apiSegmentControl;
     
     // Initialize Filters
-    self.filters = [@{@"isModpack": @(YES), @"name": @""}.mutableCopy];
+    self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     [self updateSearchResults];
 }
