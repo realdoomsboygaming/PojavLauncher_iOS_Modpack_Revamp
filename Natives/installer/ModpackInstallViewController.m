@@ -4,13 +4,10 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "config.h"
-#include <dlfcn.h>
+#import "CurseForgeAPI.h"
+#import "ModrinthAPI.h"
 
-#define kCurseForgeGameIDMinecraft 432
-#define kCurseForgeClassIDModpack 4471
-#define kCurseForgeClassIDMod 6
-
-@interface ModpackInstallViewController ()
+@interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource, UISearchResultsUpdating, UIContextMenuInteractionDelegate>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @end
 
@@ -24,6 +21,7 @@
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:self.tableView];
     
     // Configure Search Controller
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -89,9 +87,9 @@
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text;
+    // Ensure filters[@"name"] is a valid string (default to empty string if not)
     NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]] ? self.filters[@"name"] : @"");
     if (!prevList && [previousName isEqualToString:name]) return;
-
     
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -138,11 +136,11 @@
     }
     
     NSDictionary *item = self.list[indexPath.row];
-    cell.textLabel.text = item[@"title"] ?: @"Untitled";
-    cell.detailTextLabel.text = item[@"description"] ?: @"No description";
+    cell.textLabel.text = ([item[@"title"] isKindOfClass:[NSString class]] ? item[@"title"] : @"Untitled");
+    cell.detailTextLabel.text = ([item[@"description"] isKindOfClass:[NSString class]] ? item[@"description"] : @"No description");
     
     // Image Loading
-    NSString *imageUrl = item[@"imageUrl"];
+    NSString *imageUrl = ([item[@"imageUrl"] isKindOfClass:[NSString class]] ? item[@"imageUrl"] : @"");
     if (imageUrl.length > 0) {
         [self loadImageForCell:cell withURL:imageUrl];
     } else {
@@ -164,14 +162,20 @@
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     
-    // Create an action sheet to display the version options.
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version"
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     
-    [details[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
-        NSString *mcVersion = details[@"mcVersionNames"][i] ?: @"";
-        NSString *nameWithVersion = [name containsString:mcVersion] ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
+    NSArray *versionNames = details[@"versionNames"];
+    NSArray *mcVersionNames = details[@"mcVersionNames"];
+    
+    if (![versionNames isKindOfClass:[NSArray class]] || ![mcVersionNames isKindOfClass:[NSArray class]]) {
+        return;
+    }
+    
+    [versionNames enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
+        NSString *mcVersion = (mcVersionNames.count > i ? mcVersionNames[i] : @"");
+        NSString *nameWithVersion = ([name containsString:mcVersion] ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
         
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:nameWithVersion
                                                                 style:UIAlertActionStyleDefault
@@ -191,19 +195,16 @@
         [alert addAction:versionAction];
     }];
     
-    // Add a cancel action.
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     
-    // For iPad: Specify the popover presentation details.
     if (alert.popoverPresentationController) {
         alert.popoverPresentationController.sourceView = cell;
         alert.popoverPresentationController.sourceRect = cell.bounds;
         alert.popoverPresentationController.permittedArrowDirections = UIPopoverArrowDirectionAny;
     }
     
-    // Present the action sheet.
     [self presentViewController:alert animated:YES completion:nil];
 }
 
