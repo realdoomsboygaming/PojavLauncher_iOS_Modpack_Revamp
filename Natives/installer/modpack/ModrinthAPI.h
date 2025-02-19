@@ -5,6 +5,7 @@
 
 @property (nonatomic) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
+@property (nonatomic, strong) NSError *lastError;
 
 - (instancetype)init;
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)modrinthSearchResult;
