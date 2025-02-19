@@ -2,7 +2,6 @@
 #import "UZKArchive.h"
 #import "AFNetworking.h"
 
-// Constants for CurseForge API
 static const NSInteger kCurseForgeGameIDMinecraft = 432;
 static const NSInteger kCurseForgeClassIDModpack = 4471;
 static const NSInteger kCurseForgeClassIDMod = 6;
@@ -10,7 +9,7 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 @implementation CurseForgeAPI
 
 - (instancetype)init {
-    NSString *apiKey = [self loadAPIKey]; // Load API Key securely
+    NSString *apiKey = [self loadAPIKey];
     return [self initWithAPIKey:apiKey];
 }
 
@@ -36,13 +35,12 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     __block id result;
     dispatch_group_t group = dispatch_group_create();
     dispatch_group_enter(group);
-
+    
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-
     [manager.requestSerializer setValue:self.apiKey forHTTPHeaderField:@"x-api-key"];
     [manager.requestSerializer setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
-
+    
     [manager GET:url parameters:params headers:nil progress:nil
          success:^(NSURLSessionTask *task, id responseObject) {
              result = responseObject;
@@ -69,15 +67,15 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     if (searchFilters[@"mcVersion"] && [searchFilters[@"mcVersion"] length] > 0) {
         params[@"gameVersion"] = searchFilters[@"mcVersion"];
     }
-
+    
     NSDictionary *response = [self getEndpoint:@"mods/search" params:params];
     if (!response) {
         return nil;
     }
-
+    
     NSArray *dataArray = response[@"data"];
     NSMutableArray *results = previousResults ? previousResults : [NSMutableArray array];
-
+    
     for (NSDictionary *modData in dataArray) {
         NSMutableDictionary *item = [@{
             @"apiSource": @(0),
@@ -89,7 +87,7 @@ static const NSInteger kCurseForgeClassIDMod = 6;
         } mutableCopy];
         [results addObject:item];
     }
-
+    
     return results;
 }
 
@@ -99,36 +97,40 @@ static const NSInteger kCurseForgeClassIDMod = 6;
         NSLog(@"No download URL available");
         return;
     }
-
+    
     NSURL *zipUrl = [NSURL URLWithString:zipUrlString];
     NSString *destPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"modpack_install"];
     [[NSFileManager defaultManager] createDirectoryAtPath:destPath withIntermediateDirectories:YES attributes:nil error:nil];
-
+    
     NSData *zipData = [NSData dataWithContentsOfURL:zipUrl];
     if (!zipData) {
         NSLog(@"Failed to download modpack zip");
         return;
     }
-
+    
     NSString *zipPath = [destPath stringByAppendingPathComponent:@"modpack.zip"];
     [zipData writeToFile:zipPath atomically:YES];
-
+    
     NSError *error = nil;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&error];
     if (error) {
         NSLog(@"Failed to open modpack package: %@", error.localizedDescription);
         return;
     }
-
+    
     [archive extractFilesTo:destPath overwrite:YES error:&error];
     if (error) {
         NSLog(@"Failed to extract modpack: %@", error.localizedDescription);
         return;
     }
-
+    
     [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
-
+    
     NSLog(@"Modpack installed successfully from CurseForge.");
+}
+
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item {
+    NSLog(@"loadDetailsOfMod: is not implemented.");
 }
 
 @end
