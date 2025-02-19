@@ -10,4 +10,6 @@
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) UISegmentedControl *apiSegmentControl;
+
+- (void)updateSearchResults;
 @end
