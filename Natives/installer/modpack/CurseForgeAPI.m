@@ -14,38 +14,80 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 - (instancetype)init {
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
     if (self) {
-        self.previousOffset = 0; // Start pagination at zero
+        self.previousOffset = 0;
     }
     return self;
 }
+- (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters previousPageResult:(NSMutableArray *)previousResults {
+    NSInteger pageSize = 50;
+    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+    params[@"gameId"] = @(kCurseForgeGameIDMinecraft);
+    
+    BOOL isModpack = [searchFilters[@"isModpack"] boolValue];
+    params[@"classId"] = isModpack ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod);
+    params[@"searchFilter"] = searchFilters[@"name"];
+    params[@"sortField"] = @(1);
+    params[@"sortOrder"] = @"desc";
+    
+    if (searchFilters[@"mcVersion"] && [searchFilters[@"mcVersion"] length] > 0) {
+        params[@"gameVersion"] = searchFilters[@"mcVersion"];
+    }
+    
+    if (previousResults) {
+        params[@"index"] = @(self.previousOffset);
+    }
+
+    NSDictionary *response = [self getEndpoint:@"mods/search" params:params];
+    if (!response) {
+        return nil;
+    }
+
+    NSArray *dataArray = response[@"data"];
+    NSDictionary *paginationInfo = response[@"pagination"];
+    NSMutableArray *results = previousResults ? previousResults : [NSMutableArray array];
+
+    for (NSDictionary *modData in dataArray) {
+        if (modData[@"allowModDistribution"] && ![modData[@"allowModDistribution"] boolValue]) {
+            NSLog(@"Skipping modpack %@ because distribution not allowed", modData[@"name"]);
+            continue;
+        }
+        NSMutableDictionary *item = [@{
+            @"apiSource": @(0), // 0 = CurseForge
+            @"isModpack": @(isModpack),
+            @"id": [modData[@"id"] stringValue],
+            @"title": modData[@"name"] ?: @"",
+            @"description": modData[@"summary"] ?: @"",
+            @"imageUrl": modData[@"logo"] ? modData[@"logo"][@"thumbnailUrl"] : @""
+        } mutableCopy];
+        [results addObject:item];
+    }
+    self.previousOffset += dataArray.count;
+    self.reachedLastPage = (results.count >= [paginationInfo[@"totalCount"] integerValue]);
+
+    return results;
+}
 
 - (BOOL)extractDirectory:(NSString *)directory fromArchive:(UZKArchive *)archive toPath:(NSString *)destPath error:(NSError **)error {
-    // Get the list of filenames inside the archive
     NSArray<NSString *> *filenames = [archive listFilenames:error];
     if (!filenames) {
-        return NO; // Return failure if we couldn't list files
+        return NO;
     }
 
     BOOL success = YES;
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
     for (NSString *filename in filenames) {
-        // Only extract files inside the given subdirectory
         if ([filename hasPrefix:directory]) {
             NSString *fullPath = [destPath stringByAppendingPathComponent:filename];
             NSString *parentDir = [fullPath stringByDeletingLastPathComponent];
 
-            // Ensure parent directory exists before extracting the file
             [fileManager createDirectoryAtPath:parentDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-            // Extract file contents
             NSData *fileData = [archive extractDataFromFile:filename error:error];
             if (!fileData) {
                 success = NO;
-                break; // Stop on failure
+                break;
             }
-
-            // Write file to the destination path
             [fileData writeToFile:fullPath atomically:YES];
         }
     }
@@ -79,7 +121,6 @@ static const NSInteger kCurseForgeClassIDMod = 6;
         return;
     }
 
-    // Extract and parse manifest.json
     NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
     if (error || !manifestData) {
         NSLog(@"Failed to extract manifest.json: %@", error.localizedDescription);
@@ -96,14 +137,12 @@ static const NSInteger kCurseForgeClassIDMod = 6;
         return;
     }
 
-    // Extract the entire archive contents if necessary
     [archive extractFilesTo:destPath overwrite:YES error:&error];
     if (error) {
         NSLog(@"Failed to extract modpack: %@", error.localizedDescription);
         return;
     }
 
-    // Delete the ZIP after extraction
     [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
 
     NSLog(@"Modpack installed successfully from CurseForge.");
