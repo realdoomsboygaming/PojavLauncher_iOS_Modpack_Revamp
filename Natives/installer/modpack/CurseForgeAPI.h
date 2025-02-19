@@ -3,7 +3,7 @@
 
 @interface CurseForgeAPI : ModpackAPI
 
-- (instancetype)initWithAPIKey:(NSString *)apiKey;
+- (instancetype)init;
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters previousPageResult:(NSMutableArray *)previousResults;
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item;
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
