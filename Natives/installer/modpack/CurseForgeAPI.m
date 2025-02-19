@@ -1,35 +1,32 @@
 #import "CurseForgeAPI.h"
-#import "AFNetworking.h"
 #import "utils.h"
+#import "UZKArchive.h"
+#import "ModpackUtils.h" 
 
 static const NSInteger kCurseForgeGameIDMinecraft = 432;
 static const NSInteger kCurseForgeClassIDModpack = 4471;
 static const NSInteger kCurseForgeClassIDMod = 6;
 
-@implementation CurseForgeAPI {
-    BOOL reachedLastPage;
-    NSInteger previousOffset;
-    NSString *lastSearchTerm;
-    NSString *apiKey;
-    NSError *lastError;
-}
+@implementation CurseForgeAPI
 
-- (instancetype)initWithAPIKey:(NSString *)apiKey {
-    self = [super initWithURL:@"https://api.curseforge.com/v1"];
+- (instancetype)initWithAPIKey:(NSString *)apiKeyVal {
+    self = [super initWithBaseURL:[NSURL URLWithString:@"https://api.curseforge.com/v1"]];
     if (self) {
-        self.apiKey = apiKey;
-        self.previousOffset = 0;
+        _apiKey = apiKeyVal; // Use synthesized ivar
+        _previousOffset = 0;
+        self.requestSerializer = [AFJSONRequestSerializer serializer];
+        [self.requestSerializer setValue:_apiKey forHTTPHeaderField:@"x-api-key"];
     }
     return self;
 }
 
 - (NSString *)loadAPIKey {
     NSDictionary *environment = [[NSProcessInfo processInfo] environment];
-    NSString *apiKey = environment[@"CURSEFORGE_API_KEY"];
-    if (!apiKey || [apiKey length] == 0) {
-        NSLog(@"⚠️ WARNING: CurseForge API key is missing! Add CURSEFORGE_API_KEY to environment variables.");
+    NSString *envKey = environment[@"CURSEFORGE_API_KEY"];
+    if (!envKey || [envKey length] == 0) { // Rename local variable
+        NSLog(@"⚠️ WARNING: CurseForge API key missing!");
     }
-    return apiKey;
+    return envKey;
 }
 
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
