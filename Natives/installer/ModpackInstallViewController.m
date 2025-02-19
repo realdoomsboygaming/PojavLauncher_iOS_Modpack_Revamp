@@ -1,4 +1,3 @@
-#import "ModpackInstallViewController.h"
 #import "AFNetworking.h"
 #import "LauncherNavigationController.h"
 #import "ModpackInstallViewController.h"
@@ -9,33 +8,23 @@
 #import "modpack/CurseForgeAPI.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#include <dlfcn.h>
 
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
 
-@implementation ModpackInstallViewController {
-    NSString *lastSearchTerm;
-}
+@interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
+@property (nonatomic) UISearchController *searchController;
+@property (nonatomic) UIMenu *currentMenu;
+@property (nonatomic) NSMutableArray *list;
+@property (nonatomic) NSMutableDictionary *filters;
+@property (nonatomic, strong) ModrinthAPI *modrinth;
+@property (nonatomic, strong) CurseForgeAPI *curseForge;
+@property (nonatomic) UISegmentedControl *apiSegmentControl;
+@end
 
-- (void)loadView {
-    [super loadView];
-    
-    // Initialize and configure table view
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
-    self.tableView.dataSource = self;
-    self.tableView.delegate = self;
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.tableView];
-    
-    // Configure table view constraints
-    [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
-    ]];
-}
+@implementation ModpackInstallViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -45,7 +34,10 @@
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
+    // Initialize Modrinth API normally.
     self.modrinth = [ModrinthAPI new];
+    
+    // If an API key is already saved, initialize the CurseForgeAPI.
     NSString *key = [self loadAPIKey];
     if (key.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
@@ -61,6 +53,45 @@
     [self updateSearchResults];
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    NSString *key = [self loadAPIKey];
+    if (!key || key.length == 0) {
+        [self promptForAPIKey];
+    }
+}
+
+- (NSString *)loadAPIKey {
+    return [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
+}
+
+- (void)promptForAPIKey {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Enter API Key" message:@"Please enter your CurseForge API key:" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        textField.placeholder = @"API Key";
+        // Optionally set secureTextEntry if you want to hide input:
+        textField.secureTextEntry = YES;
+    }];
+    
+    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        UITextField *keyField = alert.textFields.firstObject;
+        NSString *enteredKey = keyField.text;
+        if (enteredKey.length > 0) {
+            [[NSUserDefaults standardUserDefaults] setObject:enteredKey forKey:@"CURSEFORGE_API_KEY"];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:enteredKey];
+            // Optionally refresh search results after key is saved.
+            [self updateSearchResults];
+        } else {
+            // If empty, prompt again.
+            [self promptForAPIKey];
+        }
+    }];
+    
+    [alert addAction:saveAction];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)apiSegmentChanged:(UISegmentedControl *)sender {
     self.list = [NSMutableArray new];
     self.curseForge.previousOffset = 0;
@@ -72,9 +103,14 @@
 }
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
+    NSString *name = self.searchController.searchBar.text;
+    if (!prevList && [self.filters[@"name"] isEqualToString:name]) {
+        return;
+    }
+    
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        self.filters[@"name"] = self.searchController.searchBar.text;
+        self.filters[@"name"] = name;
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
             self.list = [self.curseForge searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
         } else {
@@ -140,10 +176,9 @@
     UIImage *fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     [cell.imageView setImageWithURL:[NSURL URLWithString:item[@"imageUrl"]] placeholderImage:fallbackImage];
     
-    // Load next page when scrolling near bottom
     if ((self.apiSegmentControl.selectedSegmentIndex == 0 && !self.curseForge.reachedLastPage) ||
         (self.apiSegmentControl.selectedSegmentIndex == 1 && !self.modrinth.reachedLastPage)) {
-        if (indexPath.row >= self.list.count - 5) { // Start loading 5 rows before end
+        if (indexPath.row == self.list.count - 1) {
             [self loadSearchResultsWithPrevList:YES];
         }
     }
