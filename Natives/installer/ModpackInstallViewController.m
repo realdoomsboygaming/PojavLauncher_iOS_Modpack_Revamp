@@ -5,7 +5,6 @@
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
 #import "modpack/ModrinthAPI.h"
-#import "modpack/CurseForgeAPI.h"
 #import "config.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
@@ -17,27 +16,23 @@
 
 @interface ModpackInstallViewController()<UIContextMenuInteractionDelegate>
 @property(nonatomic) UISearchController *searchController;
-@property(nonatomic) UISegmentedControl *sourceSegmentedControl;
 @property(nonatomic) UIMenu *currentMenu;
 @property(nonatomic) NSMutableArray *list;
 @property(nonatomic) NSMutableDictionary *filters;
 @property ModrinthAPI *modrinth;
-@property CurseForgeAPI *curseForge;
 @end
 
 @implementation ModpackInstallViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
+
+    //NSString *curseforgeAPIKey = CONFIG_CURSEFORGE_API_KEY;
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
-    
     self.modrinth = [ModrinthAPI new];
-    self.curseForge = [[CurseForgeAPI alloc] init];
-    
     self.filters = @{
         @"isModpack": @(YES),
         @"name": @" "
@@ -51,29 +46,19 @@
     if (!prevList && [self.filters[@"name"] isEqualToString:name]) {
         return;
     }
-    
+
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.filters[@"name"] = name;
-        if (self.sourceSegmentedControl.selectedSegmentIndex == 0) {
-            self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
-        } else {
-            [self.curseForge searchModsWithFilters:self.filters previousPageResult:prevList ? self.list : nil completion:^(NSArray *results, BOOL hasMore, NSError *error) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (results) {
-                        self.list = [NSMutableArray arrayWithArray:results];
-                        [self switchToReadyState];
-                        [self.tableView reloadData];
-                    } else {
-                        showDialog(localize(@"Error", nil), error.localizedDescription);
-                        [self actionClose];
-                    }
-                });
-            }];
-        }
+        self.list = [self.modrinth searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self switchToReadyState];
-            [self.tableView reloadData];
+            if (self.list) {
+                [self switchToReadyState];
+                [self.tableView reloadData];
+            } else {
+                showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                [self actionClose];
+            }
         });
     });
 }
@@ -172,15 +157,7 @@
             [self actionClose];
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
                 [UIImagePNGRepresentation([cell.imageView.image _imageWithSize:CGSizeMake(40, 40)]) writeToFile:tmpIconPath atomically:YES];
-            if (self.sourceSegmentedControl.selectedSegmentIndex == 0) {
-                [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
-            } else {
-                [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i completion:^(BOOL success, NSError *error) {
-                    if (!success) {
-                        showDialog(localize(@"Error", nil), error.localizedDescription);
-                    }
-                }];
-            }
+            [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
         }]];
     }];
 
@@ -198,29 +175,14 @@
     }
     [tableView deselectRowAtIndexPath:indexPath animated:NO];
     [self switchToLoadingState];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        if (self.sourceSegmentedControl.selectedSegmentIndex == 0) {
-            [self.modrinth loadDetailsOfMod:self.list[indexPath.row]];
-        } else {
-            [self.curseForge getModDetails:item[@"id"] completion:^(NSDictionary *details, NSError *error) {
-                if (!error) {
-                    NSMutableDictionary *updatedItem = [item mutableCopy];
-                    [updatedItem addEntriesFromDictionary:details];
-                    self.list[indexPath.row] = updatedItem;
-                }
-            }];
-        }
+dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [self.modrinth loadDetailsOfMod:self.list[indexPath.row]];
         dispatch_async(dispatch_get_main_queue(), ^{
             [self switchToReadyState];
-            NSDictionary *updatedItem = self.list[indexPath.row];
-            if ([updatedItem[@"versionDetailsLoaded"] boolValue]) {
-                [self showDetails:updatedItem atIndexPath:indexPath];
+            if ([item[@"versionDetailsLoaded"] boolValue]) {
+                [self showDetails:item atIndexPath:indexPath];
             } else {
-                if (self.sourceSegmentedControl.selectedSegmentIndex == 0) {
-                    showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
-                } else {
-                    showDialog(localize(@"Error", nil), @"Failed to load mod details from CurseForge.");
-                }
+                showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
             }
         });
     });
