@@ -5,7 +5,7 @@
 #import "utils.h"
 #import "config.h"
 #import "modpack/CurseForgeAPI.h"
-#import "ModrinthAPI.h"
+#import "modpack/ModrinthAPI.h"
 
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource, UISearchResultsUpdating, UIContextMenuInteractionDelegate>
 @property (nonatomic, strong) UIImage *fallbackImage;
