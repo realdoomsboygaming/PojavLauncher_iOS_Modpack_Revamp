@@ -1,5 +1,5 @@
 #import "CurseForgeAPI.h"
-#import "UZKArchive.h"   //
+#import "UZKArchive.h"
 
 // Constants matching the CurseForge API (from the Android implementation)
 static const NSInteger kCurseForgeGameIDMinecraft = 432;
@@ -7,6 +7,9 @@ static const NSInteger kCurseForgeClassIDModpack = 4471;
 static const NSInteger kCurseForgeClassIDMod = 6;
 
 @implementation CurseForgeAPI
+
+@dynamic lastError;
+@dynamic reachedLastPage;
 
 - (instancetype)init {
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
@@ -141,6 +144,29 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     return nil;
 }
 
+// Helper method to extract all entries from a specified directory within the archive.
+- (BOOL)extractDirectory:(NSString *)directory fromArchive:(UZKArchive *)archive toPath:(NSString *)destPath error:(NSError **)error {
+    BOOL success = YES;
+    // Assuming UZKArchive has an 'entries' property that returns an array of archive entry objects.
+    NSArray *entries = archive.entries;
+    for (id entry in entries) {
+        // Adjust this line if your UZKArchive entries provide a property 'path'
+        NSString *entryPath = [entry valueForKey:@"path"];
+        if ([entryPath hasPrefix:directory]) {
+            NSString *fullPath = [destPath stringByAppendingPathComponent:entryPath];
+            NSString *directoryPath = [fullPath stringByDeletingLastPathComponent];
+            [[NSFileManager defaultManager] createDirectoryAtPath:directoryPath withIntermediateDirectories:YES attributes:nil error:nil];
+            NSData *data = [archive extractDataFromEntry:entry error:error];
+            if (!data) {
+                success = NO;
+                break;
+            }
+            [data writeToFile:fullPath atomically:YES];
+        }
+    }
+    return success;
+}
+
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
     // Get the download URL for the selected version.
     NSString *zipUrlString = detail[@"versionUrls"][index];
@@ -207,10 +233,9 @@ static const NSInteger kCurseForgeClassIDMod = 6;
         }
     }
     
-    // Extract overrides from the ZIP.
+    // Extract overrides from the ZIP using our helper.
     NSString *overridesDir = manifest[@"overrides"] ?: @"overrides";
-    [archive extractEntriesOfDirectory:overridesDir toPath:destPath error:&error];
-    if (error) {
+    if (![self extractDirectory:overridesDir fromArchive:archive toPath:destPath error:&error]) {
         NSLog(@"Failed to extract overrides: %@", error.localizedDescription);
         return;
     }
@@ -246,7 +271,7 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     if (modData) {
         NSInteger idValue = [modData[@"id"] integerValue];
         NSString *fileName = modData[@"fileName"];
-        return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%lld/%lld/%@", idValue/1000, idValue % 1000, fileName];
+        return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%ld/%ld/%@", (long)(idValue/1000), (long)(idValue % 1000), fileName];
     }
     return nil;
 }
