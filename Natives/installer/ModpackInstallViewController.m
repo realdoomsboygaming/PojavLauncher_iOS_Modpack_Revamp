@@ -4,7 +4,7 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "config.h"
-#import "CurseForgeAPI.h"
+#import "modpack/CurseForgeAPI.h"
 #import "ModrinthAPI.h"
 
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource, UISearchResultsUpdating, UIContextMenuInteractionDelegate>
