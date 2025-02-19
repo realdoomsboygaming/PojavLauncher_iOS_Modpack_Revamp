@@ -1,4 +1,4 @@
-#import "modpack/CurseForgeAPI.h"
+#import "CurseForgeAPI.h"
 #import "utils.h"
 #import "UZKArchive.h"
 #import "ModpackUtils.h"
