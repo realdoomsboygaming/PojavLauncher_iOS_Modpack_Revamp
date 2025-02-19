@@ -72,24 +72,27 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     
     BOOL isModpack = [searchFilters[@"isModpack"] boolValue];
     params[@"classId"] = isModpack ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod);
-    params[@"searchFilter"] = searchFilters[@"name"];
+    
+    // Safely extract search filter name
+    NSString *searchName = ([searchFilters[@"name"] isKindOfClass:[NSString class]] ? searchFilters[@"name"] : @"");
+    params[@"searchFilter"] = searchName;
+    
     params[@"sortField"] = @(1);
     params[@"sortOrder"] = @"desc";
     
     int limit = 50;
     params[@"pageSize"] = @(limit);
     
-    NSString *searchFilterName = ([searchFilters[@"name"] isKindOfClass:[NSString class]] ? searchFilters[@"name"] : @"");
+    // Safely compare previous search term
     NSString *lastSearchName = ([self.lastSearchTerm isKindOfClass:[NSString class]] ? self.lastSearchTerm : @"");
-    if (!previousResults || ![searchFilterName isEqualToString:lastSearchName]) {
+    if (!previousResults || ![searchName isEqualToString:lastSearchName]) {
         self.previousOffset = 0;
         self.reachedLastPage = NO;
     }
-
     
     params[@"index"] = @(self.previousOffset);
     
-    if (searchFilters[@"mcVersion"] && [searchFilters[@"mcVersion"] length] > 0) {
+    if (searchFilters[@"mcVersion"] && [searchFilters[@"mcVersion"] isKindOfClass:[NSString class]] && [searchFilters[@"mcVersion"] length] > 0) {
         params[@"gameVersion"] = searchFilters[@"mcVersion"];
     }
     
@@ -102,25 +105,34 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     self.reachedLastPage = dataArray.count < limit;
     
     for (NSDictionary *modData in dataArray) {
+        id modIdValue = modData[@"id"];
+        NSString *modId = ([modIdValue respondsToSelector:@selector(stringValue)] ? [modIdValue stringValue] : @"");
+        
+        NSString *title = ([modData[@"name"] isKindOfClass:[NSString class]] ? modData[@"name"] : @"");
+        NSString *summary = ([modData[@"summary"] isKindOfClass:[NSString class]] ? modData[@"summary"] : @"");
+        
+        NSDictionary *logoDict = ([modData[@"logo"] isKindOfClass:[NSDictionary class]] ? modData[@"logo"] : nil);
+        NSString *imageUrl = (logoDict && [logoDict[@"thumbnailUrl"] isKindOfClass:[NSString class]] ? logoDict[@"thumbnailUrl"] : @"");
+        
         NSMutableDictionary *item = [@{
             @"apiSource": @(0),
             @"isModpack": @(isModpack),
-            @"id": [modData[@"id"] stringValue],
-            @"title": modData[@"name"] ?: @"",
-            @"description": modData[@"summary"] ?: @"",
-            @"imageUrl": modData[@"logo"] ? modData[@"logo"][@"thumbnailUrl"] : @""
+            @"id": modId,
+            @"title": title,
+            @"description": summary,
+            @"imageUrl": imageUrl
         } mutableCopy];
         
         [self loadDetailsOfMod:item]; // Critical version data loading
         [results addObject:item];
     }
     
-    self.lastSearchTerm = searchFilters[@"name"];
+    self.lastSearchTerm = searchName;
     return results;
 }
 
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
-    NSString *zipUrlString = detail[@"versionUrls"][index];
+    NSString *zipUrlString = ([detail[@"versionUrls"] isKindOfClass:[NSArray class]] && index < [detail[@"versionUrls"] count] ? detail[@"versionUrls"][index] : nil);
     if (!zipUrlString) {
         NSLog(@"No download URL available");
         return;
@@ -137,7 +149,12 @@ static const NSInteger kCurseForgeClassIDMod = 6;
             return;
         }
         
-        [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
+        NSError *moveError = nil;
+        [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:&moveError];
+        if (moveError) {
+            NSLog(@"Error moving downloaded file: %@", moveError.localizedDescription);
+            return;
+        }
         
         NSError *archiveError = nil;
         UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&archiveError];
@@ -161,7 +178,7 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
     NSString *modId = item[@"id"];
-    if (!modId) return;
+    if (!modId || [modId isEqualToString:@""]) return;
     
     NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@", modId] params:nil];
     if (!response || !response[@"data"]) return;
@@ -174,30 +191,26 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     NSMutableArray *versionUrls = [NSMutableArray array];
     
     for (NSDictionary *file in files) {
-        // Version name
-        NSString *displayName = file[@"displayName"] ?: @"";
+        NSString *displayName = ([file[@"displayName"] isKindOfClass:[NSString class]] ? file[@"displayName"] : @"");
         [versionNames addObject:displayName];
         
-        // Minecraft version
-        NSArray *gameVersions = file[@"gameVersions"];
-        NSString *mcVersion = (gameVersions.count > 0) ? gameVersions.firstObject : @"";
+        NSArray *gameVersions = ([file[@"gameVersions"] isKindOfClass:[NSArray class]] ? file[@"gameVersions"] : @[]);
+        NSString *mcVersion = (gameVersions.count > 0 ? gameVersions.firstObject : @"");
         [mcVersionNames addObject:mcVersion];
         
-        // Download URL
-        NSString *fileId = [file[@"id"] stringValue];
-        NSString *downloadUrl = file[@"downloadUrl"];
+        id fileIdValue = file[@"id"];
+        NSString *fileId = ([fileIdValue respondsToSelector:@selector(stringValue)] ? [fileIdValue stringValue] : @"");
+        NSString *downloadUrl = ([file[@"downloadUrl"] isKindOfClass:[NSString class]] ? file[@"downloadUrl"] : @"");
         
-        if (!downloadUrl || [downloadUrl isEqualToString:@""]) {
-            // Construct URL if not provided
-            if (fileId.length >= 4) {
-                downloadUrl = [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%@/%@/%@",
-                             [fileId substringToIndex:4],
-                             [fileId substringWithRange:NSMakeRange(4, 2)],
-                             file[@"fileName"]];
-            }
+        if (downloadUrl.length == 0 && fileId.length >= 4) {
+            NSString *fileName = ([file[@"fileName"] isKindOfClass:[NSString class]] ? file[@"fileName"] : @"");
+            downloadUrl = [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%@/%@/%@",
+                           [fileId substringToIndex:4],
+                           [fileId substringWithRange:NSMakeRange(4, 2)],
+                           fileName];
         }
         
-        [versionUrls addObject:downloadUrl ?: @""];
+        [versionUrls addObject:downloadUrl];
     }
     
     item[@"versionNames"] = versionNames;
