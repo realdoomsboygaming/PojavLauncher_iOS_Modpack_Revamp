@@ -194,6 +194,13 @@
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     
+    // For iPad: Specify the popover presentation details.
+    if (alert.popoverPresentationController) {
+        alert.popoverPresentationController.sourceView = cell;
+        alert.popoverPresentationController.sourceRect = cell.bounds;
+        alert.popoverPresentationController.permittedArrowDirections = UIPopoverArrowDirectionAny;
+    }
+    
     // Present the action sheet.
     [self presentViewController:alert animated:YES completion:nil];
 }
