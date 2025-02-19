@@ -62,6 +62,10 @@
     [self updateSearchResults];
 }
 
+- (void)updateSearchResults {
+    [self loadSearchResultsWithPrevList:NO];
+}
+
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text;
     if (!prevList && [self.filters[@"name"] isEqualToString:name]) {
@@ -87,10 +91,6 @@
             }
         });
     });
-}
-
-- (void)updateSearchResults {
-    [self loadSearchResultsWithPrevList:NO];
 }
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
@@ -148,6 +148,12 @@
     }
     
     return cell;
+}
+
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+        return self.currentMenu;
+    }];
 }
 
 @end
