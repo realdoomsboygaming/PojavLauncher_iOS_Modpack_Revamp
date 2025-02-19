@@ -1,5 +1,6 @@
 #import "CurseForgeAPI.h"
 #import "UZKArchive.h"
+#import "AFNetworking.h"
 
 // Constants for CurseForge API
 static const NSInteger kCurseForgeGameIDMinecraft = 432;
@@ -8,16 +9,38 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 
 @implementation CurseForgeAPI
 
-@dynamic lastError;
-@dynamic reachedLastPage;
-
-- (instancetype)init {
+- (instancetype)initWithAPIKey:(NSString *)apiKey {
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
     if (self) {
+        self.apiKey = apiKey;
         self.previousOffset = 0;
     }
     return self;
 }
+- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
+    __block id result;
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_enter(group);
+
+    NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
+    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
+
+    [manager.requestSerializer setValue:self.apiKey forHTTPHeaderField:@"x-api-key"];
+    [manager.requestSerializer setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
+
+    [manager GET:url parameters:params headers:nil progress:nil
+         success:^(NSURLSessionTask *task, id responseObject) {
+             result = responseObject;
+             dispatch_group_leave(group);
+         } failure:^(NSURLSessionTask *operation, NSError *error) {
+             self.lastError = error;
+             dispatch_group_leave(group);
+         }];
+    
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+    return result;
+}
+
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters previousPageResult:(NSMutableArray *)previousResults {
     NSInteger pageSize = 50;
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
@@ -65,33 +88,6 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     self.reachedLastPage = (results.count >= [paginationInfo[@"totalCount"] integerValue]);
 
     return results;
-}
-
-- (BOOL)extractDirectory:(NSString *)directory fromArchive:(UZKArchive *)archive toPath:(NSString *)destPath error:(NSError **)error {
-    NSArray<NSString *> *filenames = [archive listFilenames:error];
-    if (!filenames) {
-        return NO;
-    }
-
-    BOOL success = YES;
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-
-    for (NSString *filename in filenames) {
-        if ([filename hasPrefix:directory]) {
-            NSString *fullPath = [destPath stringByAppendingPathComponent:filename];
-            NSString *parentDir = [fullPath stringByDeletingLastPathComponent];
-
-            [fileManager createDirectoryAtPath:parentDir withIntermediateDirectories:YES attributes:nil error:nil];
-
-            NSData *fileData = [archive extractDataFromFile:filename error:error];
-            if (!fileData) {
-                success = NO;
-                break;
-            }
-            [fileData writeToFile:fullPath atomically:YES];
-        }
-    }
-    return success;
 }
 
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
