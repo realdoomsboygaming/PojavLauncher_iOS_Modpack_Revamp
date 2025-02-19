@@ -8,7 +8,7 @@
 #import "modpack/CurseForgeAPI.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#include <dlfcn.h"
+#include <dlfcn.h>
 
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
