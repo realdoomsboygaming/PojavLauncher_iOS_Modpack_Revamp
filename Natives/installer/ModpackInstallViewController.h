@@ -2,8 +2,9 @@
 #import "modpack/ModrinthAPI.h"
 #import "modpack/CurseForgeAPI.h"
 
-@interface ModpackInstallViewController : UIViewController <UIContextMenuInteractionDelegate>
+@interface ModpackInstallViewController : UIViewController <UIContextMenuInteractionDelegate, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 
+@property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UIMenu *currentMenu;
 @property (nonatomic, strong) NSMutableArray *list;
