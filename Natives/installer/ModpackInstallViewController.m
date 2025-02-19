@@ -90,7 +90,7 @@
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text;
     if (!prevList && [self.filters[@"name"] isEqualToString:name]) return;
-
+    
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         self.filters[@"name"] = name;
@@ -104,7 +104,7 @@
             results = [self.modrinth searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
             searchError = self.modrinth.lastError;
         }
-
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             if (results) {
                 self.list = results;
@@ -159,41 +159,44 @@
 }
 
 #pragma mark - Context Menu Handling
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wundeclared-selector"
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     
-    // Fixed interaction removal using dynamic typing
-    for (id interaction in cell.interactions) {
-        [cell removeInteraction:interaction];
-    }
-    
-    NSMutableArray<UIAction *> *menuItems = [NSMutableArray new];
+    // Create an action sheet to display the version options.
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version"
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
     
     [details[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *mcVersion = details[@"mcVersionNames"][i] ?: @"";
         NSString *nameWithVersion = [name containsString:mcVersion] ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
         
-        [menuItems addObject:[UIAction actionWithTitle:nameWithVersion image:nil identifier:nil handler:^(UIAction *action) {
+        UIAlertAction *versionAction = [UIAlertAction actionWithTitle:nameWithVersion
+                                                                style:UIAlertActionStyleDefault
+                                                              handler:^(UIAlertAction * _Nonnull action) {
+            // Save the image from the cell.
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             [UIImagePNGRepresentation(cell.imageView.image) writeToFile:tmpIconPath atomically:YES];
             
+            // Install modpack using the appropriate API.
             if (self.apiSegmentControl.selectedSegmentIndex == 0) {
                 [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i];
             } else {
                 [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
             }
             [self actionClose];
-        }]];
+        }];
+        [alert addAction:versionAction];
     }];
     
-    self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
-    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
-    [cell addInteraction:interaction];
-    [interaction performSelector:@selector(_presentMenuAtLocation:) withObject:[NSValue valueWithCGPoint:CGPointZero]];
+    // Add a cancel action.
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    
+    // Present the action sheet.
+    [self presentViewController:alert animated:YES completion:nil];
 }
-#pragma clang diagnostic pop
 
 #pragma mark - UI State Management
 - (void)switchToLoadingState {
