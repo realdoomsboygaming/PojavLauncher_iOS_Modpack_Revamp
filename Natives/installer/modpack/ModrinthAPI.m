@@ -6,23 +6,58 @@
 @implementation ModrinthAPI
 
 - (instancetype)init {
-    self = [super initWithBaseURL:[NSURL URLWithString:@"https://api.modrinth.com/v2"]];
-    if (self) {
-        self.requestSerializer = [AFJSONRequestSerializer serializer];
-    }
+    self = [super init];
     return self;
+}
+
+- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
+    __block id result;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    
+    NSURLComponents *components = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"https://api.modrinth.com/v2/%@", endpoint]];
+    components.queryItems = [self queryItemsFromParams:params];
+    
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:components.URL];
+    [request setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
+    
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) {
+            self.lastError = error;
+            dispatch_semaphore_signal(semaphore);
+            return;
+        }
+        
+        NSError *jsonError;
+        result = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:&jsonError];
+        if (jsonError) {
+            self.lastError = jsonError;
+        }
+        dispatch_semaphore_signal(semaphore);
+    }];
+    
+    [task resume];
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    return result;
+}
+
+- (NSArray<NSURLQueryItem *> *)queryItemsFromParams:(NSDictionary *)params {
+    NSMutableArray *queryItems = [NSMutableArray array];
+    for (NSString *key in params) {
+        [queryItems addObject:[NSURLQueryItem queryItemWithName:key value:[NSString stringWithFormat:@"%@", params[key]]]];
+    }
+    return queryItems;
 }
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)modrinthSearchResult {
     int limit = 50;
     
     NSMutableString *facetString = [NSMutableString new];
-    [facetString appendString:@"[\""];
-    [facetString appendFormat:@"[\"project_type:%@\"]", searchFilters[@"isModpack"].boolValue ? @"modpack" : @"mod"];
+    [facetString appendString:@"[[\"project_type:%@\"]]"];
+    [facetString replaceOccurrencesOfString:@"%@" withString:(searchFilters[@"isModpack"].boolValue ? @"modpack" : @"mod") options:0 range:NSMakeRange(0, facetString.length)];
+    
     if (searchFilters[@"mcVersion"].length > 0) {
-        [facetString appendFormat:@",[\"versions:%@\"]", searchFilters[@"mcVersion"]];
+        [facetString appendFormat:@",[[\"versions:%@\"]]", searchFilters[@"mcVersion"]];
     }
-    [facetString appendString:@"]"];
     
     NSDictionary *params = @{
         @"facets": facetString,
@@ -58,9 +93,7 @@
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
     NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"project/%@/version", item[@"id"]] params:nil];
-    if (!response) {
-        return;
-    }
+    if (!response) return;
     
     NSArray *names = [response valueForKey:@"name"];
     NSMutableArray *mcNames = [NSMutableArray new];
@@ -116,24 +149,22 @@
             [task resume];
         } else if (!downloader.progress.cancelled) {
             downloader.progress.completedUnitCount++;
-        } else {
-            return;
         }
     }
     
     [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
     if (error) {
-        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides from modpack package: %@", error.localizedDescription]];
+        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", error.localizedDescription]];
         return;
     }
     
     [ModpackUtils archive:archive extractDirectory:@"client-overrides" toPath:destPath error:&error];
     if (error) {
-        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract client-overrides from modpack package: %@", error.localizedDescription]];
+        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract client-overrides: %@", error.localizedDescription]];
         return;
     }
     
-    [NSFileManager.defaultManager removeItemAtPath:packagePath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
     
     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:indexDict[@"dependencies"]];
     if (depInfo[@"json"]) {
@@ -151,25 +182,6 @@
                   [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
     }.mutableCopy;
     PLProfiles.current.selectedProfileName = indexDict[@"name"];
-}
-
-- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
-    __block id result;
-    dispatch_group_t group = dispatch_group_create();
-    dispatch_group_enter(group);
-    
-    NSString *url = [self.baseURL.absoluteString stringByAppendingPathComponent:endpoint];
-    [self GET:url parameters:params headers:nil progress:nil
-         success:^(NSURLSessionTask *task, id responseObject) {
-             result = responseObject;
-             dispatch_group_leave(group);
-         } failure:^(NSURLSessionTask *operation, NSError *error) {
-             self.lastError = error;
-             dispatch_group_leave(group);
-         }];
-    
-    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
-    return result;
 }
 
 @end
