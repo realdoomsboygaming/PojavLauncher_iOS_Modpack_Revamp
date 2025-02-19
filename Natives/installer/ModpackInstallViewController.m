@@ -1,3 +1,4 @@
+#import "ModpackInstallViewController.h"
 #import "AFNetworking.h"
 #import "LauncherNavigationController.h"
 #import "ModpackInstallViewController.h"
@@ -8,23 +9,14 @@
 #import "modpack/CurseForgeAPI.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#include <dlfcn.h> // Corrected syntax
 
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
 
-@interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
-@property (nonatomic) UISearchController *searchController;
-@property (nonatomic) UIMenu *currentMenu;
-@property (nonatomic) NSMutableArray *list;
-@property (nonatomic) NSMutableDictionary *filters;
-@property (nonatomic, strong) ModrinthAPI *modrinth;
-@property (nonatomic, strong) CurseForgeAPI *curseForge;
-@property (nonatomic) UISegmentedControl *apiSegmentControl;
-@end
-
-@implementation ModpackInstallViewController
+@implementation ModpackInstallViewController {
+    NSString *lastSearchTerm;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -97,14 +89,9 @@
 }
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
-    NSString *name = self.searchController.searchBar.text;
-    if (!prevList && [self.filters[@"name"] isEqualToString:name]) {
-        return;
-    }
-    
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        self.filters[@"name"] = name;
+        self.filters[@"name"] = self.searchController.searchBar.text;
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
             self.list = [self.curseForge searchModWithFilters:self.filters previousPageResult:prevList ? self.list : nil];
         } else {
@@ -170,9 +157,10 @@
     UIImage *fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     [cell.imageView setImageWithURL:[NSURL URLWithString:item[@"imageUrl"]] placeholderImage:fallbackImage];
     
+    // Load next page when scrolling near bottom
     if ((self.apiSegmentControl.selectedSegmentIndex == 0 && !self.curseForge.reachedLastPage) ||
         (self.apiSegmentControl.selectedSegmentIndex == 1 && !self.modrinth.reachedLastPage)) {
-        if (indexPath.row == self.list.count - 1) {
+        if (indexPath.row >= self.list.count - 5) { // Start loading 5 rows before end
             [self loadSearchResultsWithPrevList:YES];
         }
     }
