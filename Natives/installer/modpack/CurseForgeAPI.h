@@ -2,7 +2,6 @@
 #import "MinecraftResourceDownloadTask.h"
 
 @interface CurseForgeAPI : NSObject
-
 @property (nonatomic) BOOL reachedLastPage;
 @property (nonatomic) NSInteger previousOffset;
 @property (nonatomic, strong) NSString *lastSearchTerm;
@@ -10,10 +9,7 @@
 @property (nonatomic, strong) NSError *lastError;
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
-- (NSString *)loadAPIKey;
-- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params;
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters previousPageResult:(NSMutableArray *)previousResults;
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item;
-
 @end
