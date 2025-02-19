@@ -1,15 +1,6 @@
 #import <Foundation/Foundation.h>
-#import "MinecraftResourceDownloadTask.h"
+#import "ModpackAPI.h"
 
-@interface ModrinthAPI : NSObject
-
-@property (nonatomic) BOOL reachedLastPage;
-@property (nonatomic, strong) NSString *lastSearchTerm;
-@property (nonatomic, strong) NSError *lastError;
-
-- (instancetype)init;
-- (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)modrinthSearchResult;
-- (void)loadDetailsOfMod:(NSMutableDictionary *)item;
-- (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath;
-
+@interface ModrinthAPI : ModpackAPI
+- (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
 @end
