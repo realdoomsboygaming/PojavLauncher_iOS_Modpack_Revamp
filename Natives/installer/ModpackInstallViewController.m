@@ -5,7 +5,7 @@
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
 #import "modpack/ModrinthAPI.h"
-#import "modpack/CurseForgeAPI.h"  // Import the CurseForge API
+#import "modpack/CurseForgeAPI.h" 
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #include <dlfcn.h>
