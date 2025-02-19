@@ -1,8 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "MinecraftResourceDownloadTask.h"
-#import <AFNetworking/AFHTTPSessionManager.h>
 
-@interface CurseForgeAPI : AFHTTPSessionManager 
+@interface CurseForgeAPI : NSObject
 
 @property (nonatomic) BOOL reachedLastPage;
 @property (nonatomic) NSInteger previousOffset;
