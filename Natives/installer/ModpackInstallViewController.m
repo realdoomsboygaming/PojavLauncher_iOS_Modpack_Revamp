@@ -4,6 +4,9 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "config.h"
+
+// Note: Because this file is in Natives/installer and the API files are in the modpack subfolder,
+// import using the relative path. Alternatively, update your Header Search Paths.
 #import "modpack/CurseForgeAPI.h"
 #import "modpack/ModrinthAPI.h"
 
