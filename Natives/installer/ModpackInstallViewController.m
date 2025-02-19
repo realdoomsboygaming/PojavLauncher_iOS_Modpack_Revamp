@@ -47,7 +47,7 @@
     self.navigationItem.titleView = self.apiSegmentControl;
     
     // Initialize Filters
-    self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
+    self.filters = [@{@\"isModpack\": @(YES), @\"name\": @\"\"} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     [self updateSearchResults];
 }
@@ -90,13 +90,13 @@
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text;
-    // Ensure filters[@"name"] is a valid string (default to empty string if not)
-    NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]] ? self.filters[@"name"] : @"");
+    // Ensure filters[@\"name\"] is a valid string (default to empty string if not)
+    NSString *previousName = ([self.filters[@\"name\"] isKindOfClass:[NSString class]] ? self.filters[@\"name\"] : @\"\");
     if (!prevList && [previousName isEqualToString:name]) return;
     
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        self.filters[@"name"] = name;
+        self.filters[@\"name\"] = name;
         NSError *searchError = nil;
         NSMutableArray *results = nil;
         
@@ -113,7 +113,7 @@
                 self.list = results;
                 [self.tableView reloadData];
             } else {
-                showDialog(localize(@"Error", nil), searchError.localizedDescription);
+                showDialog(localize(@\"Error\", nil), searchError.localizedDescription);
             }
             [self switchToReadyState];
         });
@@ -139,11 +139,11 @@
     }
     
     NSDictionary *item = self.list[indexPath.row];
-    cell.textLabel.text = ([item[@"title"] isKindOfClass:[NSString class]] ? item[@"title"] : @"Untitled");
-    cell.detailTextLabel.text = ([item[@"description"] isKindOfClass:[NSString class]] ? item[@"description"] : @"No description");
+    cell.textLabel.text = ([item[@\"title\"] isKindOfClass:[NSString class]] ? item[@\"title\"] : @\"Untitled\");
+    cell.detailTextLabel.text = ([item[@\"description\"] isKindOfClass:[NSString class]] ? item[@\"description\"] : @\"No description\");
     
     // Image Loading
-    NSString *imageUrl = ([item[@"imageUrl"] isKindOfClass:[NSString class]] ? item[@"imageUrl"] : @"");
+    NSString *imageUrl = ([item[@\"imageUrl\"] isKindOfClass:[NSString class]] ? item[@\"imageUrl\"] : @\"\");
     if (imageUrl.length > 0) {
         [self loadImageForCell:cell withURL:imageUrl];
     } else {
@@ -169,15 +169,15 @@
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     
-    NSArray *versionNames = details[@"versionNames"];
-    NSArray *mcVersionNames = details[@"mcVersionNames"];
+    NSArray *versionNames = details[@\"versionNames\"];
+    NSArray *mcVersionNames = details[@\"mcVersionNames\"];
     
     if (![versionNames isKindOfClass:[NSArray class]] || ![mcVersionNames isKindOfClass:[NSArray class]]) {
         return;
     }
     
     [versionNames enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
-        NSString *mcVersion = (mcVersionNames.count > i ? mcVersionNames[i] : @"");
+        NSString *mcVersion = (mcVersionNames.count > i ? mcVersionNames[i] : @\"\");
         NSString *nameWithVersion = ([name containsString:mcVersion] ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
         
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:nameWithVersion
