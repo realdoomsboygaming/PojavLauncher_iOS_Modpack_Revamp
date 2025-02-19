@@ -61,42 +61,6 @@
     [self updateSearchResults];
 }
 
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    NSString *key = [self loadAPIKey];
-    if (!key || key.length == 0) {
-        [self promptForAPIKey];
-    }
-}
-
-- (NSString *)loadAPIKey {
-    return [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
-}
-
-- (void)promptForAPIKey {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Enter API Key" message:@"Please enter your CurseForge API key:" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
-        textField.placeholder = @"API Key";
-        textField.secureTextEntry = YES;
-    }];
-    
-    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        UITextField *keyField = alert.textFields.firstObject;
-        NSString *enteredKey = keyField.text;
-        if (enteredKey.length > 0) {
-            [[NSUserDefaults standardUserDefaults] setObject:enteredKey forKey:@"CURSEFORGE_API_KEY"];
-            [[NSUserDefaults standardUserDefaults] synchronize];
-            self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:enteredKey];
-            [self updateSearchResults];
-        } else {
-            [self promptForAPIKey];
-        }
-    }];
-    
-    [alert addAction:saveAction];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
 - (void)apiSegmentChanged:(UISegmentedControl *)sender {
     self.list = [NSMutableArray new];
     self.curseForge.previousOffset = 0;
