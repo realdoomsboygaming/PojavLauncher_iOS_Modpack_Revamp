@@ -46,7 +46,7 @@
     self.navigationItem.titleView = self.apiSegmentControl;
     
     // Initialize Filters
-    self.filters = [(@{@"isModpack": @(YES), @"name": @""}).mutableCopy];
+    self.filters = [@{@"isModpack": @(YES), @"name": @""}.mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     [self updateSearchResults];
 }
@@ -153,7 +153,7 @@
     }];
     
     self.currentMenu = [UIMenu menuWithTitle:@"" children:menuItems];
-    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
+    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:(id<UIContextMenuInteractionDelegate>)self];
     [cell.detailTextLabel addInteraction:interaction];
     [interaction performSelector:@selector(_presentMenuAtLocation:) withObject:[NSValue valueWithCGPoint:CGPointZero]];
 }
