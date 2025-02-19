@@ -144,24 +144,24 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     return nil;
 }
 
-// Helper method to extract all entries from a specified directory within the archive.
+// Helper method using UZKArchive's available methods:
+// It lists filenames using 'listFilenamesWithError:' and then extracts each file via 'extractFile:toPath:error:'
 - (BOOL)extractDirectory:(NSString *)directory fromArchive:(UZKArchive *)archive toPath:(NSString *)destPath error:(NSError **)error {
+    NSArray *filenames = [archive listFilenamesWithError:error];
+    if (!filenames) {
+        return NO;
+    }
     BOOL success = YES;
-    // Assuming UZKArchive has an 'entries' property that returns an array of archive entry objects.
-    NSArray *entries = archive.entries;
-    for (id entry in entries) {
-        // Adjust this line if your UZKArchive entries provide a property 'path'
-        NSString *entryPath = [entry valueForKey:@"path"];
-        if ([entryPath hasPrefix:directory]) {
-            NSString *fullPath = [destPath stringByAppendingPathComponent:entryPath];
+    for (NSString *filename in filenames) {
+        if ([filename hasPrefix:directory]) {
+            NSString *fullPath = [destPath stringByAppendingPathComponent:filename];
             NSString *directoryPath = [fullPath stringByDeletingLastPathComponent];
             [[NSFileManager defaultManager] createDirectoryAtPath:directoryPath withIntermediateDirectories:YES attributes:nil error:nil];
-            NSData *data = [archive extractDataFromEntry:entry error:error];
-            if (!data) {
+            BOOL extracted = [archive extractFile:filename toPath:fullPath error:error];
+            if (!extracted) {
                 success = NO;
                 break;
             }
-            [data writeToFile:fullPath atomically:YES];
         }
     }
     return success;
