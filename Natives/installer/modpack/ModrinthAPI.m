@@ -1,14 +1,16 @@
 #import "ModrinthAPI.h"
 #import "PLProfiles.h"
+#import "UZKArchive.h"
+#import "ModpackUtils.h"
 
-@implementation ModrinthAPI {
-    BOOL reachedLastPage;
-    NSString *lastSearchTerm;
-    NSError *lastError;
-}
+@implementation ModrinthAPI
 
 - (instancetype)init {
-    return [super initWithURL:@"https://api.modrinth.com/v2"];
+    self = [super initWithBaseURL:[NSURL URLWithString:@"https://api.modrinth.com/v2"]];
+    if (self) {
+        self.requestSerializer = [AFJSONRequestSerializer serializer];
+    }
+    return self;
 }
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)modrinthSearchResult {
@@ -18,7 +20,7 @@
     [facetString appendString:@"[\""];
     [facetString appendFormat:@"[\"project_type:%@\"]", searchFilters[@"isModpack"].boolValue ? @"modpack" : @"mod"];
     if (searchFilters[@"mcVersion"].length > 0) {
-        [facetString appendFormat:@",["versions:%@"]", searchFilters[@"mcVersion"]];
+        [facetString appendFormat:@",[\"versions:%@\"]", searchFilters[@"mcVersion"]];
     }
     [facetString appendString:@"]"];
     
@@ -149,6 +151,25 @@
                   [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
     }.mutableCopy;
     PLProfiles.current.selectedProfileName = indexDict[@"name"];
+}
+
+- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
+    __block id result;
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_enter(group);
+    
+    NSString *url = [self.baseURL.absoluteString stringByAppendingPathComponent:endpoint];
+    [self GET:url parameters:params headers:nil progress:nil
+         success:^(NSURLSessionTask *task, id responseObject) {
+             result = responseObject;
+             dispatch_group_leave(group);
+         } failure:^(NSURLSessionTask *operation, NSError *error) {
+             self.lastError = error;
+             dispatch_group_leave(group);
+         }];
+    
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+    return result;
 }
 
 @end
