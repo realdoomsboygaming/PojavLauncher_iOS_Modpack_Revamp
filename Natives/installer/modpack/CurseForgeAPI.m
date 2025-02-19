@@ -1,5 +1,4 @@
 #import "CurseForgeAPI.h"
-#import "UZKArchive.h"
 #import "AFNetworking.h"
 #import "utils.h"
 
@@ -7,11 +6,12 @@ static const NSInteger kCurseForgeGameIDMinecraft = 432;
 static const NSInteger kCurseForgeClassIDModpack = 4471;
 static const NSInteger kCurseForgeClassIDMod = 6;
 
-@implementation CurseForgeAPI
-
-- (instancetype)init {
-    NSString *apiKey = [self loadAPIKey];
-    return [self initWithAPIKey:apiKey];
+@implementation CurseForgeAPI {
+    BOOL reachedLastPage;
+    NSInteger previousOffset;
+    NSString *lastSearchTerm;
+    NSString *apiKey;
+    NSError *lastError;
 }
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey {
@@ -65,6 +65,17 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     params[@"sortField"] = @(1);
     params[@"sortOrder"] = @"desc";
     
+    int limit = 50;
+    params[@"pageSize"] = @(limit);
+    
+    // Reset offset if this is a new search
+    if (!previousResults || ![searchFilters[@"name"] isEqualToString:self.lastSearchTerm]) {
+        self.previousOffset = 0;
+        self.reachedLastPage = NO;
+    }
+    
+    params[@"index"] = @(self.previousOffset);
+    
     if (searchFilters[@"mcVersion"] && [searchFilters[@"mcVersion"] length] > 0) {
         params[@"gameVersion"] = searchFilters[@"mcVersion"];
     }
@@ -76,6 +87,12 @@ static const NSInteger kCurseForgeClassIDMod = 6;
     
     NSArray *dataArray = response[@"data"];
     NSMutableArray *results = previousResults ? previousResults : [NSMutableArray array];
+    
+    // Update offset for next page
+    self.previousOffset += dataArray.count;
+    
+    // Check if we've reached the end
+    self.reachedLastPage = dataArray.count < limit;
     
     for (NSDictionary *modData in dataArray) {
         NSMutableDictionary *item = [@{
@@ -89,6 +106,7 @@ static const NSInteger kCurseForgeClassIDMod = 6;
         [results addObject:item];
     }
     
+    self.lastSearchTerm = searchFilters[@"name"];
     return results;
 }
 
@@ -135,7 +153,13 @@ static const NSInteger kCurseForgeClassIDMod = 6;
 }
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    NSLog(@"loadDetailsOfMod: is not implemented.");
+    NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@", item[@"id"]] params:nil];
+    if (!response) {
+        return;
+    }
+    
+    // Add implementation for loading mod details
+    // Similar to ModrinthAPI's implementation but adapted for CurseForge's API structure
 }
 
 @end
