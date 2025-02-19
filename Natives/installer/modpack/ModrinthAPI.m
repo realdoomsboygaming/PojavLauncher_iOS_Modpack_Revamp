@@ -1,8 +1,11 @@
-#import "MinecraftResourceDownloadTask.h"
+#import "ModrinthAPI.h"
 #import "ModrinthAPI.h"
 #import "PLProfiles.h"
 
-@implementation ModrinthAPI
+@implementation ModrinthAPI {
+    BOOL reachedLastPage;
+    NSString *lastSearchTerm;
+}
 
 - (instancetype)init {
     return [super initWithURL:@"https://api.modrinth.com/v2"];
@@ -12,10 +15,10 @@
     int limit = 50;
     
     NSMutableString *facetString = [NSMutableString new];
-    [facetString appendString:@"["];
+    [facetString appendString:@"[\""];
     [facetString appendFormat:@"[\"project_type:%@\"]", searchFilters[@"isModpack"].boolValue ? @"modpack" : @"mod"];
     if (searchFilters[@"mcVersion"].length > 0) {
-        [facetString appendFormat:@",[\"versions:%@\"]", searchFilters[@"mcVersion"]];
+        [facetString appendFormat:@",["versions:%@"]", searchFilters[@"mcVersion"]];
     }
     [facetString appendString:@"]"];
     
@@ -26,6 +29,7 @@
         @"index": @"relevance",
         @"offset": @(modrinthSearchResult.count)
     };
+    
     NSDictionary *response = [self getEndpoint:@"search" params:params];
     if (!response) {
         return nil;
@@ -43,7 +47,9 @@
             @"imageUrl": hit[@"icon_url"]
         }.mutableCopy];
     }
+    
     self.reachedLastPage = result.count >= [response[@"total_hits"] unsignedLongValue];
+    self.lastSearchTerm = searchFilters[@"name"];
     return result;
 }
 
@@ -52,6 +58,7 @@
     if (!response) {
         return;
     }
+    
     NSArray *names = [response valueForKey:@"name"];
     NSMutableArray *mcNames = [NSMutableArray new];
     NSMutableArray *urls = [NSMutableArray new];
@@ -96,12 +103,6 @@
     
     downloader.progress.totalUnitCount = [indexDict[@"files"] count];
     for (NSDictionary *indexFile in indexDict[@"files"]) {
-        /*
-        if ([indexFile[@"downloads"] count] > 1) {
-            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Unhandled multiple files download %@", indexFile[@"downloads"]]];
-            return;
-        }
-        */
         NSString *url = [indexFile[@"downloads"] firstObject];
         NSString *sha = indexFile[@"hashes"][@"sha1"];
         NSString *path = [destPath stringByAppendingPathComponent:indexFile[@"path"]];
@@ -140,7 +141,7 @@
     
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     PLProfiles.current.profiles[indexDict[@"name"]] = @{
-        @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
+        @"gameDir": [NSString stringWithFormat="./custom_gamedir/%@", destPath.lastPathComponent],
         @"name": indexDict[@"name"],
         @"lastVersionId": depInfo[@"id"],
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@",
