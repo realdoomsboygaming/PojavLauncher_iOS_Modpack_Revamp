@@ -15,13 +15,6 @@
 #define kCurseForgeClassIDMod 6
 
 @interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
-@property (nonatomic) UISearchController *searchController;
-@property (nonatomic) UIMenu *currentMenu;
-@property (nonatomic) NSMutableArray *list;
-@property (nonatomic) NSMutableDictionary *filters;
-@property (nonatomic, strong) ModrinthAPI *modrinth;
-@property (nonatomic, strong) CurseForgeAPI *curseForge;
-@property (nonatomic) UISegmentedControl *apiSegmentControl;
 @end
 
 @implementation ModpackInstallViewController
@@ -34,10 +27,8 @@
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
-    // Initialize Modrinth API normally.
     self.modrinth = [ModrinthAPI new];
     
-    // If an API key is already saved, initialize the CurseForgeAPI.
     NSString *key = [self loadAPIKey];
     if (key.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
@@ -67,23 +58,20 @@
 
 - (void)promptForAPIKey {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Enter API Key" message:@"Please enter your CurseForge API key:" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
         textField.placeholder = @"API Key";
-        // Optionally set secureTextEntry if you want to hide input:
         textField.secureTextEntry = YES;
     }];
     
-    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         UITextField *keyField = alert.textFields.firstObject;
         NSString *enteredKey = keyField.text;
         if (enteredKey.length > 0) {
             [[NSUserDefaults standardUserDefaults] setObject:enteredKey forKey:@"CURSEFORGE_API_KEY"];
             [[NSUserDefaults standardUserDefaults] synchronize];
             self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:enteredKey];
-            // Optionally refresh search results after key is saved.
             [self updateSearchResults];
         } else {
-            // If empty, prompt again.
             [self promptForAPIKey];
         }
     }];
