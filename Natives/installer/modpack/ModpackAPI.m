@@ -18,22 +18,18 @@
 #pragma mark - Must be overridden
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    // Subclass should override
     [self doesNotRecognizeSelector:_cmd];
 }
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters
                       previousPageResult:(NSMutableArray *)prevResult {
-    // Subclass should override
     [self doesNotRecognizeSelector:_cmd];
     return nil;
 }
 
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
-            toPath:(NSString *)destPath
-{
-    // Subclass should override
+            toPath:(NSString *)destPath {
     [self doesNotRecognizeSelector:_cmd];
 }
 
@@ -47,18 +43,32 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000
     [manager GET:url
       parameters:params
-        headers:nil
-       progress:nil
-        success:^(NSURLSessionTask *task, id obj) {
-            result = obj;
-            dispatch_group_leave(group);
-        }
-        failure:^(NSURLSessionTask *operation, NSError *error) {
-            self.lastError = error;
-            dispatch_group_leave(group);
-        }];
+         headers:nil
+        progress:nil
+         success:^(NSURLSessionTask *task, id obj) {
+             result = obj;
+             dispatch_group_leave(group);
+         }
+         failure:^(NSURLSessionTask *operation, NSError *error) {
+             self.lastError = error;
+             dispatch_group_leave(group);
+         }];
+#else
+    [manager GET:url
+      parameters:params
+        progress:nil
+         success:^(NSURLSessionTask *task, id obj) {
+             result = obj;
+             dispatch_group_leave(group);
+         }
+         failure:^(NSURLSessionTask *operation, NSError *error) {
+             self.lastError = error;
+             dispatch_group_leave(group);
+         }];
+#endif
     
     dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
     return result;
@@ -67,17 +77,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 #pragma mark - Install
 
 - (void)installModpackFromDetail:(NSDictionary *)modDetail
-                         atIndex:(NSUInteger)selectedVersion
-{
-    // Post a notification that something else might pick up to do the actual install
+                         atIndex:(NSUInteger)selectedVersion {
     NSDictionary *userInfo = @{
         @"detail": modDetail,
         @"index": @(selectedVersion)
     };
-    [NSNotificationCenter.defaultCenter
-         postNotificationName:@"InstallModpack"
-                       object:self
-                     userInfo:userInfo];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack"
+                                                        object:self
+                                                      userInfo:userInfo];
 }
 
 @end
