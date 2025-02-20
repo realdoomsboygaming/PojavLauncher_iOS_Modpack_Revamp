@@ -244,6 +244,7 @@
         
         downloader.progress.totalUnitCount = files.count;
         
+        // Enqueue each file for download
         for (NSDictionary *fileEntry in files) {
             NSNumber *projectID = fileEntry[@"projectID"];
             NSNumber *fileID = fileEntry[@"fileID"];
@@ -254,7 +255,7 @@
                 [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for project %@ file %@", projectID, fileID]];
                 return;
             } else if (!url) {
-                continue;
+                continue; // optional file with no URL
             }
             
             NSString *relativePath = fileEntry[@"path"];
@@ -270,28 +271,32 @@
             } else if (!downloader.progress.cancelled) {
                 downloader.progress.completedUnitCount++;
             } else {
-                return;
+                return; // cancelled
             }
         }
         
+        // Extract overrides directory
         [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
         if (error) {
             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", error.localizedDescription]];
             return;
         }
         
+        // Clean up the package
         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
         
-        // Extract vanilla and mod loader versions from the manifest.
+        // Extract version info from the manifest
         NSDictionary *minecraft = manifestDict[@"minecraft"];
         NSString *vanillaVersion = @"";
         NSString *modLoaderId = @"";
-        NSString *modLoaderVersion = @"";
+        NSString *finalVersionString = @"";
+        
         if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
             vanillaVersion = minecraft[@"version"] ?: @"";
             NSArray *modLoaders = minecraft[@"modLoaders"];
-            NSDictionary *primaryModLoader = nil;
             if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
+                NSDictionary *primaryModLoader = nil;
+                // Find the primary loader, if any
                 for (NSDictionary *loader in modLoaders) {
                     if ([loader[@"primary"] boolValue]) {
                         primaryModLoader = loader;
@@ -301,27 +306,48 @@
                 if (!primaryModLoader) {
                     primaryModLoader = modLoaders[0];
                 }
-                modLoaderId = primaryModLoader[@"id"] ?: @"";
+                
+                modLoaderId = primaryModLoader[@"id"] ?: @""; 
+                // e.g. "forge-50.33" or "fabric-0.16.10"
                 NSRange dashRange = [modLoaderId rangeOfString:@"-"];
                 if (dashRange.location != NSNotFound) {
-                    // Split modLoaderId into name and version
-                    // For example, "forge-36.2.0" -> modLoaderName: "forge", modLoaderVersion: "36.2.0"
-                    NSString *loaderName = [modLoaderId substringToIndex:dashRange.location];
-                    modLoaderVersion = [modLoaderId substringFromIndex:(dashRange.location + 1)];
-                    NSLog(@"[CurseForgeAPI] Mod loader: %@ version: %@", loaderName, modLoaderVersion);
+                    // "forge" or "fabric"
+                    NSString *loaderName = [modLoaderId substringToIndex:dashRange.location]; 
+                    NSString *loaderVersion = [modLoaderId substringFromIndex:(dashRange.location + 1)];
+                    
+                    // Format strings based on loaderName
+                    if ([loaderName isEqualToString:@"forge"]) {
+                        // e.g. "1.21-forge-50.33"
+                        finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, loaderVersion];
+                    } else if ([loaderName isEqualToString:@"fabric"]) {
+                        // e.g. "fabric-loader-0.16.10-1.21.4"
+                        finalVersionString = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVersion, vanillaVersion];
+                    } else {
+                        // fallback for other mod loaders
+                        // e.g. "1.16.5 | modloader-1.0"
+                        finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
+                    }
+                } else {
+                    // no dash found, fallback
+                    finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                 }
+            } else {
+                // No mod loaders found
+                finalVersionString = vanillaVersion;
             }
+        } else {
+            // No 'minecraft' object
+            finalVersionString = @"unknown";
         }
-        // Combine vanilla and mod loader versions.
-        NSString *combinedVersion = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderVersion];
         
+        // Create or update the profile
         NSString *profileName = manifestDict[@"name"];
         if (profileName) {
             NSDictionary *profileInfo = @{
                 @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", [destPath lastPathComponent]],
                 @"name": profileName,
-                @"lastVersionId": combinedVersion,
-                @"icon": @"" // Implement icon extraction if needed.
+                @"lastVersionId": finalVersionString,
+                @"icon": @"" // Optionally set an icon
             };
             PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
             PLProfiles.current.selectedProfileName = profileName;
