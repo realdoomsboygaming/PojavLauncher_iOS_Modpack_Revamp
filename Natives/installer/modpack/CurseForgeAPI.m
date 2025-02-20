@@ -148,10 +148,9 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     for (NSDictionary *modDict in dataArray) {
         if (![modDict isKindOfClass:[NSDictionary class]]) continue;
 
-        // Skip if "allowModDistribution" is false (like your Android code)
+        // Skip if "allowModDistribution" is false
         id allowDist = modDict[@"allowModDistribution"];
         if ([allowDist isKindOfClass:[NSNumber class]] && ![allowDist boolValue]) {
-            // If it's explicitly false, skip
             NSLog(@"[CurseForgeAPI] Skipping modpack because allowModDistribution=false");
             continue;
         }
@@ -214,7 +213,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files", modId];
         NSDictionary *resp = [self getEndpoint:endpoint params:params];
         if (!resp) {
-            // error => bail
             return;
         }
         NSArray *data = resp[@"data"];
@@ -238,11 +236,9 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         } else {
             pageOffset += data.count;
         }
-        // If we added zero this page, we risk infinite looping => break
+        // Prevent potential infinite loop if no files added
         if (addedCount == 0 && data.count == 50) {
-            // If we got 50 but all were server packs => next page
-            // We keep going, but if that continues, we might be stuck in a loop
-            // We'll assume eventually we find a non-server pack or we hit a short page
+            break;
         }
     }
 
@@ -252,8 +248,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     NSMutableArray<NSString *> *versionUrls  = [NSMutableArray arrayWithCapacity:allFiles.count];
     NSMutableArray<NSString *> *hashes       = [NSMutableArray arrayWithCapacity:allFiles.count];
 
-    // For each file, find its "displayName", "downloadUrl", "gameVersions" (for MC version),
-    // plus we might do a second get to fetch the SHA-1 if needed. We'll skip that if it's in "hashes" directly.
     for (NSDictionary *fileDict in allFiles) {
         NSString *displayName = (fileDict[@"displayName"] ?: @"");
         [versionNames addObject:displayName];
@@ -271,8 +265,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         }
         [versionUrls addObject:dlUrl];
 
-        // If you want the SHA1, we can parse "hashes" array from the file object:
-        // "hashes" => array of { "value": "...", "algo": 1=sha1 }
+        // Parse SHA1 from "hashes" if available
         NSString *sha1 = [self getSha1FromFileDict:fileDict];
         [hashes addObject:(sha1 ?: @"")];
     }
@@ -281,6 +274,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     item[@"mcVersionNames"] = mcVersions;
     item[@"versionUrls"] = versionUrls;
     item[@"versionHashes"] = hashes;
+    item[@"versionDetailsLoaded"] = @(YES);
 }
 
 // Helper to parse the "hashes" array from a file dictionary
@@ -299,32 +293,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     return nil;
 }
 
-#pragma mark - Install (like Java's "installCurseforgeZip")
+#pragma mark - Install
 
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
-    // We'll do the "download the .zip" approach, but also parse its "manifest.json" => for sub-files
-    // => We'll queue each file in "manifest.files" individually with MinecraftResourceDownloadTask.
-
-    // 1) Make sure we have a versionUrls array
-    NSArray *urls = detail[@"versionUrls"];
-    if (![urls isKindOfClass:[NSArray class]] || index < 0 || index >= urls.count) {
-        NSLog(@"[CurseForgeAPI] No valid versionUrls or invalid index %ld", (long)index);
-        return;
-    }
-    NSString *zipUrlString = urls[index];
-    if (zipUrlString.length == 0) {
-        NSLog(@"[CurseForgeAPI] Empty zipUrl at index %ld", (long)index);
-        return;
-    }
-    NSURL *zipURL = [NSURL URLWithString:zipUrlString];
-    if (!zipURL) {
-        NSLog(@"[CurseForgeAPI] Could not parse zip url: %@", zipUrlString);
-        return;
-    }
-
-    // 2) Post a notification so that the iOS code can use a MinecraftResourceDownloadTask.
-    // Or do it inline. We'll show the inline approach, mirroring your Modrinth style:
-    // But best to keep consistent with your existing "downloader:submitDownloadTasks..." design.
+    // Post a notification that something else might pick up to do the actual install
     NSDictionary *userInfo = @{
         @"detail": detail,
         @"index": @(index),
@@ -336,14 +308,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
                     userInfo:userInfo];
 }
 
-// If you use a MinecraftResourceDownloadTask approach, you override the method
-// "downloader:submitDownloadTasksFromPackage:toPath:" to parse manifest.json
-// and queue each sub-file. Similar to the Android's "installCurseforgeZip(...)".
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath
 {
-    // 1) Open the zip with UZKArchive
     NSError *error;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
     if (error) {
@@ -352,7 +320,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
 
-    // 2) Extract "manifest.json"
+    // Extract "manifest.json"
     NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
     if (!manifestData || error) {
         [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in CF modpack"];
@@ -365,38 +333,31 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
 
-    // 3) "files" => array of { projectID, fileID, required }
+    // "files" => array of { projectID, fileID, required }
     NSArray *filesArr = manifest[@"files"];
     if (![filesArr isKindOfClass:[NSArray class]]) {
         [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No 'files' array in manifest.json"];
         return;
     }
-
-    // We'll set totalUnitCount to the number of sub-file downloads
     downloader.progress.totalUnitCount = filesArr.count;
 
-    // 4) For each file, build a direct download URL and queue with createDownloadTask:
     for (NSDictionary *cfFile in filesArr) {
-        // `projectID`, `fileID`
         NSNumber *projID = cfFile[@"projectID"];
         NSNumber *fileID = cfFile[@"fileID"];
         BOOL required = [cfFile[@"required"] boolValue];
 
-        // Build an API call "GET /mods/:projectID/files/:fileID/download-url" to get a direct link
+        // Build an API call to get a direct download link; include gameId parameter.
         NSString *downloadUrl = [self getDownloadURLForProject:projID file:fileID];
         if (!downloadUrl && required) {
-            // If it's required but we can't get a URL, fail:
             [downloader finishDownloadWithErrorString:
-              [NSString stringWithFormat:@"[CurseForgeAPI] Could not obtain download URL for project %@, file %@",
-               projID, fileID]];
+              [NSString stringWithFormat:@"[CurseForgeAPI] Could not obtain download URL for project %@, file %@", projID, fileID]];
             return;
         } else if (!downloadUrl) {
-            // If not required, we skip it
             downloader.progress.completedUnitCount++;
             continue;
         }
 
-        // We'll guess the final filename from the URL (or from the CF file info).
+        // Guess final filename from the URL
         NSString *fileName = downloadUrl.lastPathComponent;
         NSString *destModPath = [destPath stringByAppendingPathComponent:
                                  [NSString stringWithFormat:@"mods/%@", fileName]];
@@ -416,14 +377,13 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             [downloader.fileList addObject:relPath];
             [subTask resume];
         } else if (!downloader.progress.cancelled) {
-            // If the subTask is nil but we're not cancelled, increment progress
             downloader.progress.completedUnitCount++;
         } else {
             return; // cancelled
         }
     }
 
-    // 5) Extract overrides
+    // Extract overrides
     NSString *overridesDir = manifest[@"overrides"];
     if (![overridesDir isKindOfClass:[NSString class]] || overridesDir.length == 0) {
         overridesDir = @"overrides";
@@ -434,18 +394,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
           [NSString stringWithFormat:@"[CurseForgeAPI] Could not extract overrides: %@", error.localizedDescription]];
         return;
     }
-    // Some packs also might use "Overrides" => optional.
-
-    // Clean up
+    // Clean up the .zip package
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
 
-    // 6) Make a profile in PLProfiles
+    // Create or update the profile in PLProfiles
     NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
     NSString *iconBase64 = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
 
-    // parse out "minecraft" => "version", "modLoaders" => ...
+    // Parse out dependency information from the manifest (e.g. mod loader id)
     NSDictionary *minecraftDict = manifest[@"minecraft"];
     NSString *depID = @"";
     if ([minecraftDict isKindOfClass:[NSDictionary class]]) {
@@ -453,7 +411,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
             NSDictionary *loaderObj = modLoaders.firstObject;
             if ([loaderObj[@"id"] isKindOfClass:[NSString class]]) {
-                depID = loaderObj[@"id"]; // e.g. "forge-1.18.2-..."
+                depID = loaderObj[@"id"];
             }
         }
     }
@@ -462,7 +420,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     profiles.profiles[packName] = [@{
         @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
         @"name": packName,
-        @"lastVersionId": depID,
+        @"lastVersionId": depID ?: @"",
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@", iconBase64]
     } mutableCopy];
 
@@ -474,42 +432,41 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 
 - (NSString *)getDownloadURLForProject:(NSNumber *)projID file:(NSNumber *)fileID {
     if (!projID || !fileID) return nil;
-    NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@/download-url",
-                          projID, fileID];
-    NSDictionary *resp = [self getEndpoint:endpoint params:nil];
+    // Include gameId parameter per API requirement
+    NSDictionary *params = @{@"gameId": @(kCurseForgeGameIDMinecraft)};
+    NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@/download-url", projID, fileID];
+    NSDictionary *resp = [self getEndpoint:endpoint params:params];
     if (![resp isKindOfClass:[NSDictionary class]]) {
         return nil;
     }
     id dataVal = resp[@"data"];
     if ([dataVal isKindOfClass:[NSString class]]) {
-        // success => direct link
+        // Success: direct download URL returned
         return dataVal;
     }
-
-    // fallback approach: call "GET /mods/:projID/files/:fileID" to get "fileName"
+    
+    // Fallback: fetch file details and build an edge.forgecdn.net URL
     endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
-    NSDictionary *fallback = [self getEndpoint:endpoint params:nil];
+    NSDictionary *fallback = [self getEndpoint:endpoint params:params];
     NSDictionary *fallbackData = fallback[@"data"];
     if ([fallbackData isKindOfClass:[NSDictionary class]]) {
-        // Build edge.forgecdn.net link
         NSNumber *fID = fallbackData[@"id"];
         NSString *fileName = fallbackData[@"fileName"];
         if (fID && fileName) {
             int numericId = [fID intValue];
             int prefix = numericId / 1000;
             int suffix = numericId % 1000;
-            return [NSString stringWithFormat:
-              @"https://edge.forgecdn.net/files/%d/%d/%@", prefix, suffix, fileName];
+            return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%d/%@", prefix, suffix, fileName];
         }
     }
     return nil;
 }
 
 - (NSString *)getSha1ForProject:(NSNumber *)projID file:(NSNumber *)fileID {
-    // We can call GET /mods/:projID/files/:fileID => parse "hashes"
     if (!projID || !fileID) return nil;
+    NSDictionary *params = @{@"gameId": @(kCurseForgeGameIDMinecraft)};
     NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
-    NSDictionary *resp = [self getEndpoint:endpoint params:nil];
+    NSDictionary *resp = [self getEndpoint:endpoint params:params];
     NSDictionary *data = resp[@"data"];
     if (![data isKindOfClass:[NSDictionary class]]) {
         return nil;
