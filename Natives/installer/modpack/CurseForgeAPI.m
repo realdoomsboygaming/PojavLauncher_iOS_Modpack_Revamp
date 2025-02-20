@@ -10,16 +10,14 @@
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
 
-@interface CurseForgeAPI ()
-@property (nonatomic, strong) NSString *apiKey;
-@end
-
 @implementation CurseForgeAPI
+
+#pragma mark - Initialization
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey {
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
     if (self) {
-        self.apiKey = apiKey;
+        _apiKey = apiKey;
     }
     return self;
 }
@@ -33,6 +31,7 @@
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     
+    // Use our API key or fallback to environment variable
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -59,13 +58,13 @@
 
 - (void)searchModWithFilters:(NSDictionary *)searchFilters
          previousPageResult:(NSMutableArray *)prevResult
-                 completion:(void (^)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion {
+                 completion:(void (^ _Nonnull)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int limit = 50;
         NSString *query = searchFilters[@"name"] ?: @"";
         NSMutableDictionary *params = [@{
             @"gameId": @(kCurseForgeGameIDMinecraft),
-            @"classId": (searchFilters[@"isModpack"] && [searchFilters[@"isModpack"] boolValue]) ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod),
+            @"classId": (([searchFilters[@"isModpack"] boolValue]) ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod)),
             @"searchFilter": query,
             @"pageSize": @(limit),
             @"index": @(prevResult.count)
@@ -92,10 +91,11 @@
             NSMutableDictionary *entry = [@{
                 @"apiSource": @(0),
                 @"isModpack": @(isModpack),
-                @"id": mod[@"id"],
-                @"title": mod[@"name"],
-                @"description": mod[@"summary"] ?: @"",
-                @"imageUrl": mod[@"logo"] ?: @""
+                // Force id to be a string
+                @"id": [NSString stringWithFormat:@"%@", mod[@"id"]],
+                @"title": (mod[@"name"] ? [NSString stringWithFormat:@"%@", mod[@"name"]] : @""),
+                @"description": (mod[@"summary"] ? [NSString stringWithFormat:@"%@", mod[@"summary"]] : @""),
+                @"imageUrl": (mod[@"logo"] ? [NSString stringWithFormat:@"%@", mod[@"logo"]] : @"")
             } mutableCopy];
             [result addObject:entry];
         }
@@ -112,7 +112,8 @@
     });
 }
 
-- (void)loadDetailsOfMod:(NSMutableDictionary *)item completion:(void (^)(NSError * _Nullable error))completion {
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item
+              completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *modId = [NSString stringWithFormat:@"%@", item[@"id"]];
         NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", modId] params:nil];
@@ -132,22 +133,23 @@
         NSMutableArray *sizes = [NSMutableArray new];
         
         [files enumerateObjectsUsingBlock:^(NSDictionary *file, NSUInteger i, BOOL *stop) {
-            [names addObject:file[@"fileName"] ?: @""];
+            [names addObject:[NSString stringWithFormat:@"%@", file[@"fileName"] ?: @""]];
             id versions = file[@"gameVersion"] ?: file[@"gameVersionList"];
             NSString *gameVersion = @"";
             if ([versions isKindOfClass:[NSArray class]] && [versions count] > 0) {
-                gameVersion = versions[0];
+                gameVersion = [NSString stringWithFormat:@"%@", versions[0]];
             } else if ([versions isKindOfClass:[NSString class]]) {
-                gameVersion = versions;
+                gameVersion = [NSString stringWithFormat:@"%@", versions];
             }
             [mcNames addObject:gameVersion];
-            [urls addObject:file[@"downloadUrl"] ?: @""];
+            [urls addObject:[NSString stringWithFormat:@"%@", file[@"downloadUrl"] ?: @""]];
             [sizes addObject:[NSString stringWithFormat:@"%@", file[@"fileLength"] ?: @"0"]];
+            
             NSString *sha1 = @"";
             NSArray *hashesArray = file[@"hashes"];
             for (NSDictionary *hashDict in hashesArray) {
-                if ([hashDict[@"algo"] isEqualToString:@"SHA1"]) {
-                    sha1 = hashDict[@"value"];
+                if ([[NSString stringWithFormat:@"%@", hashDict[@"algo"]] isEqualToString:@"SHA1"]) {
+                    sha1 = [NSString stringWithFormat:@"%@", hashDict[@"value"]];
                     break;
                 }
             }
@@ -171,8 +173,7 @@
 
 - (void)installModpackFromDetail:(NSDictionary *)modDetail
                          atIndex:(NSUInteger)selectedVersion
-                      completion:(void (^)(NSError * _Nullable error))completion {
-    // Use the base class implementation (which posts a notification) then call completion.
+                      completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
     [super installModpackFromDetail:modDetail atIndex:selectedVersion];
     if (completion) {
         completion(nil);
