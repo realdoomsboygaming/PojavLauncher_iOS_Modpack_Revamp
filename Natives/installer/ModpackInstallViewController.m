@@ -26,31 +26,25 @@
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    
-    // iOS 11+ style:
     self.navigationItem.searchController = self.searchController;
     
     // Create the segmented control for selecting “CurseForge” or “Modrinth”
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
     self.apiSegmentControl.selectedSegmentIndex = 0; // Default to CurseForge
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
-    [self.apiSegmentControl addTarget:self
-                               action:@selector(apiSegmentChanged:)
-                     forControlEvents:UIControlEventValueChanged];
+    [self.apiSegmentControl addTarget:self action:@selector(apiSegmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
     
     // Attempt to load stored CF key and initialize the CF object if present
     NSString *storedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (storedKey.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:storedKey];
-        // Set the parent view controller for integrated browser fallback
+        // Set the parent view controller so that the fallback browser can be presented.
         self.curseForge.parentViewController = self;
     } else {
-        // Prompt the user for a key right away if we’re on the CF tab
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
             [self promptForCurseForgeAPIKey];
         }
-        // If the user later switches to CF, we’ll prompt again inside apiSegmentChanged:
     }
     
     // Initialize our Modrinth API
@@ -62,38 +56,42 @@
     // Fallback image for cells with no project icon
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     
+    // Register to listen for the "ModpackReadyForPlay" notification.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(modpackReadyForPlay:)
+                                                 name:@"ModpackReadyForPlay"
+                                               object:nil];
+    
     // Trigger initial search
     [self updateSearchResults];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 #pragma mark - Prompt for CF key if missing
 
 - (void)promptForCurseForgeAPIKey {
-    UIAlertController *alert =
-      [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
-                                          message:@"Please enter your CurseForge API key"
-                                   preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
+                                                                   message:@"Please enter your CurseForge API key"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"Your CF API Key here";
-        textField.secureTextEntry = NO; // set YES if you want it masked
+        textField.secureTextEntry = NO;
     }];
     
     UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
                                                        style:UIAlertActionStyleDefault
-                                                     handler:^(UIAlertAction * _Nonnull action)
-    {
+                                                     handler:^(UIAlertAction * _Nonnull action) {
         NSString *key = alert.textFields.firstObject.text ?: @"";
         if (key.length > 0) {
-            // Store it
             [[NSUserDefaults standardUserDefaults] setObject:key forKey:@"CURSEFORGE_API_KEY"];
             [[NSUserDefaults standardUserDefaults] synchronize];
-            
-            // Instantiate the CF object and assign parent view controller for fallback
             self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
             self.curseForge.parentViewController = self;
             [self updateSearchResults];
         } else {
-            // If user provided no key, default to Modrinth
             self.apiSegmentControl.selectedSegmentIndex = 1;
             [self updateSearchResults];
         }
@@ -102,9 +100,7 @@
     
     UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
                                                            style:UIAlertActionStyleCancel
-                                                         handler:^(UIAlertAction * _Nonnull action)
-    {
-        // If the user cancels, switch to Modrinth automatically
+                                                         handler:^(UIAlertAction * _Nonnull action) {
         self.apiSegmentControl.selectedSegmentIndex = 1;
         [self updateSearchResults];
     }];
@@ -116,12 +112,11 @@
 #pragma mark - UISegmentedControl Action
 
 - (void)apiSegmentChanged:(UISegmentedControl *)sender {
-    // If switching to CF but no key present, prompt
     if (sender.selectedSegmentIndex == 0) {
         NSString *key = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
         if (!key || key.length == 0) {
             [self promptForCurseForgeAPIKey];
-            return; // let the prompt handle the rest
+            return;
         }
     }
     
@@ -145,6 +140,26 @@
     [self loadSearchResultsWithPrevList:NO];
 }
 
+#pragma mark - Notification Handler
+
+- (void)modpackReadyForPlay:(NSNotification *)notification {
+    // When a modpack is ready for play, display a "Play" button.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIBarButtonItem *playButton = [[UIBarButtonItem alloc] initWithTitle:@"Play"
+                                                                       style:UIBarButtonItemStyleDone
+                                                                      target:self
+                                                                      action:@selector(playModpackPressed:)];
+        self.navigationItem.rightBarButtonItem = playButton;
+    });
+}
+
+- (void)playModpackPressed:(id)sender {
+    // When the user taps "Play," start the pending download.
+    [self.curseForge startPendingDownload];
+    // Optionally, remove the play button after starting.
+    self.navigationItem.rightBarButtonItem = nil;
+}
+
 #pragma mark - Loading Search Results
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
@@ -161,7 +176,6 @@
         NSMutableArray *results = nil;
         
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-            // Using CurseForge
             if (!self.curseForge) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [self switchToReadyState];
@@ -171,13 +185,10 @@
                 });
                 return;
             }
-            results = [self.curseForge searchModWithFilters:self.filters
-                                         previousPageResult:(prevList ? self.list : nil)];
+            results = [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
             searchError = self.curseForge.lastError;
         } else {
-            // Using Modrinth
-            results = [self.modrinth searchModWithFilters:self.filters
-                                       previousPageResult:(prevList ? self.list : nil)];
+            results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
             searchError = self.modrinth.lastError;
         }
         
@@ -205,8 +216,6 @@
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
         cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
         cell.imageView.clipsToBounds = YES;
-        
-        // Add context menu interaction (iOS 13+)
         UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
         [cell addInteraction:interaction];
     }
@@ -215,7 +224,6 @@
     cell.textLabel.text = ([item[@"title"] isKindOfClass:[NSString class]] ? item[@"title"] : @"Untitled");
     cell.detailTextLabel.text = ([item[@"description"] isKindOfClass:[NSString class]] ? item[@"description"] : @"No description");
     
-    // Load image
     NSString *imageUrl = ([item[@"imageUrl"] isKindOfClass:[NSString class]] ? item[@"imageUrl"] : @"");
     if (imageUrl.length > 0) {
         [self loadImageForCell:cell withURL:imageUrl];
@@ -223,7 +231,6 @@
         cell.imageView.image = self.fallbackImage;
     }
     
-    // Handle “infinite scrolling” if the API supports pages
     BOOL usingCurseForge = (self.apiSegmentControl.selectedSegmentIndex == 0);
     BOOL reachedLastPage = usingCurseForge ? self.curseForge.reachedLastPage : self.modrinth.reachedLastPage;
     if (!reachedLastPage && indexPath.row == self.list.count - 1) {
@@ -238,10 +245,8 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     
-    // Get the selected modpack details as a mutable dictionary
     NSMutableDictionary *item = [self.list objectAtIndex:indexPath.row];
     
-    // If version details aren't loaded, load them first
     if (![item[@"versionDetailsLoaded"] boolValue]) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             if (self.apiSegmentControl.selectedSegmentIndex == 0) {
@@ -303,12 +308,10 @@
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
                                                               handler:^(UIAlertAction * _Nonnull action) {
-            // Save the cell’s image to a temporary location for the final profile’s icon
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             NSData *imgData = UIImagePNGRepresentation(cell.imageView.image);
             [imgData writeToFile:tmpIconPath atomically:YES];
             
-            // Install the chosen version
             if (self.apiSegmentControl.selectedSegmentIndex == 0) {
                 [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i];
             } else {
@@ -367,9 +370,8 @@
     NSURL *url = [NSURL URLWithString:urlString];
     if (!url) return;
     
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
-      dataTaskWithURL:url
-    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url
+                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (!error && data) {
             UIImage *img = [UIImage imageWithData:data];
             dispatch_async(dispatch_get_main_queue(), ^{
