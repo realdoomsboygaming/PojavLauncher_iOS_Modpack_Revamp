@@ -87,8 +87,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     BOOL isModpack = [searchFilters[@"isModpack"] boolValue];
     params[@"classId"] = isModpack ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod);
     
-    NSString *searchName = ([searchFilters[@"name"] isKindOfClass:[NSString class]] ?
-                            searchFilters[@"name"] : @"");
+    NSString *searchName = ([searchFilters[@"name"] isKindOfClass:[NSString class]] ? searchFilters[@"name"] : @"");
     params[@"searchFilter"] = searchName;
     
     // Sort by popularity
@@ -107,8 +106,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     params[@"index"] = @(self.previousOffset);
     
     // Optionally add a gameVersion filter
-    NSString *mcVersion = ([searchFilters[@"mcVersion"] isKindOfClass:[NSString class]] ?
-                           searchFilters[@"mcVersion"] : nil);
+    NSString *mcVersion = ([searchFilters[@"mcVersion"] isKindOfClass:[NSString class]] ? searchFilters[@"mcVersion"] : nil);
     if (mcVersion.length > 0) {
         params[@"gameVersion"] = mcVersion;
     }
@@ -150,8 +148,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         NSString *title = ([modDict[@"name"] isKindOfClass:[NSString class]] ? modDict[@"name"] : @"");
         NSString *summary = ([modDict[@"summary"] isKindOfClass:[NSString class]] ? modDict[@"summary"] : @"");
         NSString *imageUrl = @"";
-        NSDictionary *logoDict = ([modDict[@"logo"] isKindOfClass:[NSDictionary class]] ?
-                                  modDict[@"logo"] : nil);
+        NSDictionary *logoDict = ([modDict[@"logo"] isKindOfClass:[NSDictionary class]] ? modDict[@"logo"] : nil);
         if ([logoDict[@"thumbnailUrl"] isKindOfClass:[NSString class]]) {
             imageUrl = logoDict[@"thumbnailUrl"];
         }
@@ -266,12 +263,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
                                                       userInfo:userInfo];
 }
 
-// Updated downloader method to match Java logic:
-// 1. Open the downloaded modpack zip and extract manifest.json.
-// 2. Verify the manifest.
-// 3. For each file in manifest[@"files"], fetch the download URL and create download tasks.
-// 4. Extract the overrides folder.
-// 5. Update the profile with mod loader info.
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
@@ -295,7 +286,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
     
-    // Verify manifest (must be a valid minecraftModpack)
+    // Verify manifest: must be a valid minecraftModpack with manifestVersion 1 and required fields.
     if (!([manifest[@"manifestType"] isEqualToString:@"minecraftModpack"] &&
           [manifest[@"manifestVersion"] integerValue] == 1 &&
           manifest[@"minecraft"] &&
@@ -307,7 +298,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
     
-    // Process files array from manifest
+    // Process files array from manifest.
     NSArray *filesArr = manifest[@"files"];
     if (![filesArr isKindOfClass:[NSArray class]]) {
         [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No 'files' array in manifest.json"];
@@ -320,7 +311,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSNumber *fileID = cfFile[@"fileID"];
         BOOL required = [cfFile[@"required"] boolValue];
         
-        // Obtain download URL using our helper (includes gameId parameter)
+        // Obtain download URL using helper (includes gameId parameter)
         NSString *downloadUrl = [self getDownloadURLForProject:projID file:fileID];
         if (!downloadUrl && required) {
             [downloader finishDownloadWithErrorString:
@@ -351,7 +342,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         }
     }
     
-    // Extract overrides from modpack; default folder is "overrides", but can be overridden by manifest
+    // Extract overrides folder (default is "overrides", or overridden by manifest)
     NSString *overridesDir = @"overrides";
     if ([manifest[@"overrides"] isKindOfClass:[NSString class]] && [manifest[@"overrides"] length] > 0) {
         overridesDir = manifest[@"overrides"];
@@ -363,16 +354,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
     
-    // Delete the modpack zip as cleanup
+    // Cleanup: Delete the modpack zip.
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
     
-    // Update profile with modpack information
+    // Update user profile with modpack information.
     NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
     NSString *iconBase64 = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
     
-    // Determine mod loader info by selecting the primary mod loader if available
+    // Determine mod loader info by selecting the primary mod loader if available.
     NSDictionary *minecraftDict = manifest[@"minecraft"];
     NSString *depID = @"";
     if ([minecraftDict isKindOfClass:[NSDictionary class]]) {
@@ -409,20 +400,29 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 #pragma mark - Download URL & SHA Helpers
 
 - (NSString *)getDownloadURLForProject:(NSNumber *)projID file:(NSNumber *)fileID {
-    if (!projID || !fileID) return nil;
+    if (!projID || !fileID) {
+        NSLog(@"getDownloadURLForProject: Missing projID or fileID");
+        return nil;
+    }
     NSDictionary *params = @{@"gameId": @(kCurseForgeGameIDMinecraft)};
     NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@/download-url", projID, fileID];
     NSDictionary *resp = [self getEndpoint:endpoint params:params];
-    if (![resp isKindOfClass:[NSDictionary class]]) return nil;
+    NSLog(@"getDownloadURLForProject: Response from %@: %@", endpoint, resp);
+    if (![resp isKindOfClass:[NSDictionary class]]) {
+        NSLog(@"getDownloadURLForProject: Response is not a dictionary");
+        return nil;
+    }
     
     id dataVal = resp[@"data"];
     if ([dataVal isKindOfClass:[NSString class]] && ((NSString *)dataVal).length > 0) {
+        NSLog(@"getDownloadURLForProject: Retrieved URL: %@", dataVal);
         return dataVal;
     }
     
     // Fallback: fetch file details and construct URL manually.
     endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
     NSDictionary *fallback = [self getEndpoint:endpoint params:params];
+    NSLog(@"getDownloadURLForProject: Fallback response from %@: %@", endpoint, fallback);
     NSDictionary *fallbackData = fallback[@"data"];
     if ([fallbackData isKindOfClass:[NSDictionary class]]) {
         NSNumber *fID = fallbackData[@"id"];
@@ -431,10 +431,12 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             int numericId = [fID intValue];
             int prefix = numericId / 1000;
             int suffix = numericId % 1000;
-            // Use %03d to zero-pad the suffix.
-            return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%03d/%@", prefix, suffix, fileName];
+            NSString *constructedURL = [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%03d/%@", prefix, suffix, fileName];
+            NSLog(@"getDownloadURLForProject: Constructed fallback URL: %@", constructedURL);
+            return constructedURL;
         }
     }
+    NSLog(@"getDownloadURLForProject: Could not obtain a download URL");
     return nil;
 }
 
