@@ -19,7 +19,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 @property (nonatomic, strong) NSDictionary *pendingModpackDetail;
 @property (nonatomic, assign) NSInteger pendingModpackIndex;
 
-// Private method declaration
+// Private helper method.
 - (NSString *)getSha1FromFileDict:(NSDictionary *)fileDict;
 @end
 
@@ -272,10 +272,36 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
     self.fallbackZipUrl = zipUrlString;
     
-    // Immediately process the manifest and create the profile.
-    // For this example, we assume the zip file is already downloaded locally at zipURL.path.
-    NSString *destinationPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), detail[@"id"]];
-    [self processManifestFromPackage:zipURL destinationPath:destinationPath downloader:nil];
+    // Immediately download the modpack zip and process the manifest.
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+    NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:zipURL completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        if (error) {
+            NSLog(@"[CurseForgeAPI] Error downloading zip file: %@", error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        // Move the downloaded file to a temporary location.
+        NSString *tempDir = NSTemporaryDirectory();
+        NSString *destinationFilePath = [NSString stringWithFormat:@"%@/modpack_%@", tempDir, detail[@"id"]];
+        [[NSFileManager defaultManager] removeItemAtPath:destinationFilePath error:nil];
+        NSError *fileError = nil;
+        BOOL success = [[NSFileManager defaultManager] moveItemAtPath:location.path toPath:destinationFilePath error:&fileError];
+        if (!success) {
+            NSLog(@"[CurseForgeAPI] Error moving zip file: %@", fileError);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        // Define a destination folder for the modpack profile.
+        NSString *customDestPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), detail[@"id"]];
+        // Process the manifest to create/update the profile.
+        [self processManifestFromPackage:[NSURL fileURLWithPath:destinationFilePath] destinationPath:customDestPath downloader:nil];
+    }];
+    [downloadTask resume];
 }
 
 /// Process the modpack manifest: extract, parse, verify, and create/update the profile.
@@ -375,14 +401,17 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             self.pendingManifest = manifest;
             self.pendingPackagePath = packagePath;
             self.pendingDestinationPath = destPath;
+            self.pendingModpackDetail = detail;
+            self.pendingModpackIndex = index;
             
-            // Notify the UI that the modpack is ready for play.
+            // Notify the UI that the modpack is ready to play.
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackReadyForPlay" object:self];
         });
     });
 }
 
-/// Start downloading individual mod files using the stored manifest and destination.
+#pragma mark - Start Pending Download
+
 - (void)startPendingDownload {
     if (!self.pendingManifest || !self.pendingPackagePath || !self.pendingDestinationPath) {
         NSLog(@"startPendingDownload: No pending download available");
@@ -437,6 +466,8 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         self.pendingDestinationPath = nil;
     });
 }
+
+#pragma mark - Fallback Browser
 
 - (void)fallbackOpenBrowserWithURL:(NSString *)urlString {
     if (!urlString || urlString.length == 0) return;
