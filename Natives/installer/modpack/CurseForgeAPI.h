@@ -2,6 +2,7 @@
 #define CurseForgeAPI_h
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>  // Needed for UIViewController
 
 @interface CurseForgeAPI : NSObject
 
@@ -10,6 +11,11 @@
 @property (nonatomic, assign) NSInteger previousOffset;
 @property (nonatomic, assign) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
+
+// Added property for integrated browser fallback.
+// This property will be set by the view controller so that SFSafariViewController
+// can be presented from it when needed.
+@property (nonatomic, weak) UIViewController *parentViewController;
 
 /// Initialize with a CurseForge API key
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
