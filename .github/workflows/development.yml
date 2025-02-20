@@ -18,17 +18,12 @@ jobs:
         include:
           - platform: 2
             platform_name: ios
-          - platform: 7
-            platform_name: iossimulator
-          - platform: 8
-            platform_name: tvossimulator
-    
+
     runs-on: macos-latest
     steps:
       - name: Install include tools
         run: brew install temurin@8 ldid make
-      - name: Set API Key Environment Variable
-        run: echo "CURSEFORGE_API_KEY=${{ secrets.CURSEFORGE_API_KEY }}" >> $GITHUB_ENV
+
       - name: Remove work folders
         env:
           password: ${{ secrets.ELLIE_MINI_SECRET }}
@@ -46,18 +41,19 @@ jobs:
       - name: Checkout repository submodules
         run: git submodule update --init --recursive
 
-      - name: Get gl4es latest commit hash
-        id: gl4es-sha
+      - name: Set API Key Environment Variable
+        run: echo "CURSEFORGE_API_KEY=${{ secrets.CURSEFORGE_API_KEY }}" >> $GITHUB_ENV
+
       - name: Get gl4es latest commit hash
         id: gl4es-sha
         run: |
+          # Grab the latest commit SHA for gl4es-114-extra
           GIT_SHA=$(git ls-remote https://github.com/PojavLauncherTeam/gl4es-114-extra refs/heads/master | grep -io '^\S*')
           echo "sha=$GIT_SHA" >> "$GITHUB_OUTPUT"
-        shell: bash
 
       - name: Cache gl4es
         uses: actions/cache@v3
-        if: false # use gl4es 1.1.5
+        if: false
         id: gl4es-cache
         with:
           path: gl4es/libs
@@ -96,7 +92,7 @@ jobs:
       - name: Get JRE8
         uses: dawidd6/action-download-artifact@v2
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: build.yml
           path: depends
           workflow_conclusion: success
@@ -108,7 +104,7 @@ jobs:
       - name: Get JRE17
         uses: dawidd6/action-download-artifact@v2
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: build.yml
           path: depends
           workflow_conclusion: completed
@@ -120,7 +116,7 @@ jobs:
       - name: Get JRE21
         uses: dawidd6/action-download-artifact@v2
         with:
-          github_token: ${{secrets.GITHUB_TOKEN}}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: build.yml
           path: depends
           workflow_conclusion: completed
@@ -136,14 +132,11 @@ jobs:
           export PATH=/opt/procursus/bin:/opt/homebrew/bin:$PATH
           export RUNNER=1 SLIMMED=1
           if [ "${{ matrix.platform_name }}" == "ios" ]; then
-            # Build ipa and tipa for iOS
             gmake -j"$(sysctl -n hw.ncpu)" dsym package PLATFORM=${{ matrix.platform }}
             gmake -j"$(sysctl -n hw.ncpu)" dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1
           elif [ "${{ matrix.platform_name }}" == "tvos" ]; then
-            # Build tipa only for tvOS
             gmake -j"$(sysctl -n hw.ncpu)" dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1
           else
-            # Build ipa only for everything else
             gmake -j"$(sysctl -n hw.ncpu)" dsym package PLATFORM=${{ matrix.platform }}
           fi
 
@@ -172,8 +165,8 @@ jobs:
           path: artifacts/net.kdt.pojavlauncher.slimmed-*-${{ matrix.platform_name }}-trollstore.tipa
 
       - name: Upload PojavLauncher.dSYM
-        uses: actions/upload-artifact@v4
         if: matrix.platform_name == 'ios'
+        uses: actions/upload-artifact@v4
         with:
           name: PojavLauncher.dSYM
           path: artifacts/PojavLauncher.dSYM
