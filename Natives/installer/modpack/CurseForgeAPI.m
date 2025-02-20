@@ -123,7 +123,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         return nil;
     }
     
-    JsonObject *paginationInfo = response[@"pagination"];
+    NSDictionary *paginationInfo = response[@"pagination"];
     NSUInteger totalCount = 0;
     if ([paginationInfo isKindOfClass:[NSDictionary class]]) {
         NSNumber *tc = paginationInfo[@"totalCount"];
