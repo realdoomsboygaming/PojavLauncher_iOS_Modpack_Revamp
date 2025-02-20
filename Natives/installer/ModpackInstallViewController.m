@@ -137,6 +137,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text ?: @"";
+    // Update filters with current search text
+    self.filters[@"name"] = name;
+    
     NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]] ? self.filters[@"name"] : @"");
     if (!prevList && [previousName isEqualToString:name]) {
         return;
@@ -167,17 +170,19 @@ NS_ASSUME_NONNULL_BEGIN
             });
         }];
     } else {
-        // For Modrinth, using existing synchronous behavior.
-        NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
-        NSError *searchError = self.modrinth.lastError;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (results) {
-                self.list = results;
-                [self.tableView reloadData];
-            } else if (searchError) {
-                showDialog(localize(@"Error", nil), searchError.localizedDescription);
-            }
-            [self switchToReadyState];
+        // For Modrinth, dispatch the synchronous search off the main thread.
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
+            NSError *searchError = self.modrinth.lastError;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (results) {
+                    self.list = results;
+                    [self.tableView reloadData];
+                } else if (searchError) {
+                    showDialog(localize(@"Error", nil), searchError.localizedDescription);
+                }
+                [self switchToReadyState];
+            });
         });
     }
 }
@@ -253,7 +258,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 #pragma mark - Context Menu (iOS 13+)
 
-// Adjusted return types to be explicitly nullable
 - (UIContextMenuConfiguration * _Nullable)tableView:(UITableView *)tableView
 contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
                                     point:(CGPoint)point {
@@ -382,3 +386,4 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 @end
 
 NS_ASSUME_NONNULL_END
+
