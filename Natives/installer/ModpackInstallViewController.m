@@ -11,6 +11,8 @@
 #import "utils.h"
 #include <dlfcn.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @end
@@ -20,7 +22,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    // Ensure that the search controller is presented within this view controller’s bounds.
+    // Ensure the search controller is presented within this view controller’s bounds.
     self.definesPresentationContext = YES;
     
     // Setup table view
@@ -62,10 +64,6 @@
     
     // Trigger initial search
     [self updateSearchResults];
-}
-
-- (void)dealloc {
-    // Removed observer for non-existent notification
 }
 
 #pragma mark - Prompt for CF Key if Missing
@@ -126,12 +124,8 @@
 #pragma mark - UISearchResultsUpdating
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    [NSObject cancelPreviousPerformRequestsWithTarget:self
-                                             selector:@selector(updateSearchResults)
-                                               object:nil];
-    [self performSelector:@selector(updateSearchResults)
-               withObject:nil
-               afterDelay:0.5];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateSearchResults) object:nil];
+    [self performSelector:@selector(updateSearchResults) withObject:nil afterDelay:0.5];
 }
 
 - (void)updateSearchResults {
@@ -384,3 +378,5 @@
 }
 
 @end
+
+NS_ASSUME_NONNULL_END
