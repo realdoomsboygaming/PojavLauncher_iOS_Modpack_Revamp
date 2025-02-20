@@ -12,7 +12,9 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 @interface CurseForgeAPI ()
 // Used for fallback integrated browser when errors occur.
 @property (nonatomic, strong) NSString *fallbackZipUrl;
-// parentViewController is declared in the header.
+// Pending modpack detail and index – used to defer download until user confirms.
+@property (nonatomic, strong) NSDictionary *pendingModpackDetail;
+@property (nonatomic, assign) NSInteger pendingModpackIndex;
 @end
 
 @implementation CurseForgeAPI
@@ -27,6 +29,8 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         _reachedLastPage = NO;
         _lastSearchTerm = nil;
         _fallbackZipUrl = nil;
+        _pendingModpackDetail = nil;
+        _pendingModpackIndex = 0;
     }
     return self;
 }
@@ -272,15 +276,31 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     // Save the zip URL for fallback purposes.
     self.fallbackZipUrl = zipUrlString;
     
-    // Proceed with internal download process by posting notification.
+    // Instead of starting the download immediately, store the modpack detail and version index
+    // and notify the UI that the modpack is ready to be played.
+    self.pendingModpackDetail = detail;
+    self.pendingModpackIndex = index;
+    
+    // Notify the UI (via notification) that the modpack is ready for user to press "Play".
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackReadyForPlay" object:self];
+}
+
+- (void)startPendingDownload {
+    if (!self.pendingModpackDetail) {
+        NSLog(@"startPendingDownload: No pending modpack detail available");
+        return;
+    }
+    NSDictionary *detail = self.pendingModpackDetail;
+    NSInteger index = self.pendingModpackIndex;
     NSDictionary *userInfo = @{
         @"detail": detail,
         @"index": @(index),
         @"source": @(0)  // 0 indicates CurseForge
     };
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack"
-                                                        object:self
-                                                      userInfo:userInfo];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack" object:self userInfo:userInfo];
+    // Clear pending detail after starting download.
+    self.pendingModpackDetail = nil;
+    self.pendingModpackIndex = 0;
 }
 
 - (void)fallbackOpenBrowserWithURL:(NSString *)urlString {
@@ -355,7 +375,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         // Limit concurrent downloads to 5.
         dispatch_semaphore_t downloadSemaphore = dispatch_semaphore_create(5);
         
-        // Process each file.
         for (NSDictionary *cfFile in filesArr) {
             NSNumber *projID = cfFile[@"projectID"];
             NSNumber *fileID = cfFile[@"fileID"];
