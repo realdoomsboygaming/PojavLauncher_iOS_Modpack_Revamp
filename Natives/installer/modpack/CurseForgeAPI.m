@@ -249,16 +249,16 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 
 #pragma mark - Install Modpack
 
-- (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
+- (void)installModpackFromDetail:(NSDictionary *)modpackDetail atIndex:(NSInteger)selectedIndex {
     // Retrieve the modpack zip URL from the mod detail.
-    NSArray *urls = detail[@"versionUrls"];
-    if (![urls isKindOfClass:[NSArray class]] || index < 0 || index >= urls.count) {
-        NSLog(@"[CurseForgeAPI] No valid versionUrls or invalid index %ld", (long)index);
+    NSArray *urls = modpackDetail[@"versionUrls"];
+    if (![urls isKindOfClass:[NSArray class]] || selectedIndex < 0 || selectedIndex >= urls.count) {
+        NSLog(@"[CurseForgeAPI] No valid versionUrls or invalid index %ld", (long)selectedIndex);
         return;
     }
-    NSString *zipUrlString = urls[index];
+    NSString *zipUrlString = urls[selectedIndex];
     if (zipUrlString.length == 0) {
-        NSLog(@"[CurseForgeAPI] Empty zipUrl at index %ld", (long)index);
+        NSLog(@"[CurseForgeAPI] Empty zipUrl at index %ld", (long)selectedIndex);
         [self fallbackOpenBrowserWithURL:zipUrlString];
         return;
     }
@@ -270,7 +270,11 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
     self.fallbackZipUrl = zipUrlString;
     
-    // Immediately download the modpack zip file.
+    // Start downloading the modpack zip immediately.
+    // Capture the modpack detail and selected index in local variables.
+    NSDictionary *modpackDetailCopy = [modpackDetail copy];
+    NSInteger selectedIndexCopy = selectedIndex;
+    
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
     NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:zipURL completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
@@ -283,7 +287,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         }
         // Move the downloaded file to a temporary location.
         NSString *tempDir = NSTemporaryDirectory();
-        NSString *destinationFilePath = [NSString stringWithFormat:@"%@/modpack_%@", tempDir, detail[@"id"]];
+        NSString *destinationFilePath = [NSString stringWithFormat:@"%@/modpack_%@", tempDir, modpackDetailCopy[@"id"]];
         [[NSFileManager defaultManager] removeItemAtPath:destinationFilePath error:nil];
         NSError *fileError = nil;
         BOOL success = [[NSFileManager defaultManager] moveItemAtPath:location.path toPath:destinationFilePath error:&fileError];
@@ -295,7 +299,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             return;
         }
         // Define a destination folder for the modpack profile.
-        NSString *customDestPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), detail[@"id"]];
+        NSString *customDestPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), modpackDetailCopy[@"id"]];
         // Process the manifest to create/update the profile.
         [self processManifestFromPackage:[NSURL fileURLWithPath:destinationFilePath] destinationPath:customDestPath downloader:nil];
     }];
@@ -399,8 +403,8 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             self.pendingManifest = manifest;
             self.pendingPackagePath = packagePath;
             self.pendingDestinationPath = destPath;
-            self.pendingModpackDetail = detail;
-            self.pendingModpackIndex = index;
+            self.pendingModpackDetail = modpackDetail; // Use the modpackDetail captured earlier
+            self.pendingModpackIndex = selectedIndex;  // Use the selectedIndex captured earlier
             
             // Notify the UI that the modpack is ready for play.
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackReadyForPlay" object:self];
