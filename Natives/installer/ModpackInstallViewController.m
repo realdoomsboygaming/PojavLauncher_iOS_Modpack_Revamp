@@ -170,28 +170,33 @@
     }
     
     [self switchToLoadingState];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        self.filters[@"name"] = name;
-        NSError *searchError = nil;
-        NSMutableArray *results = nil;
-        
-        if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-            if (!self.curseForge) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self switchToReadyState];
-                    showDialog(@"Missing CF Key", @"No CurseForge API key provided. Switching to Modrinth.");
-                    self.apiSegmentControl.selectedSegmentIndex = 1;
-                    [self updateSearchResults];
-                });
-                return;
-            }
-            results = [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
-            searchError = self.curseForge.lastError;
-        } else {
-            results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
-            searchError = self.modrinth.lastError;
+    
+    if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+        // Use the asynchronous CurseForge API method.
+        if (!self.curseForge) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self switchToReadyState];
+                showDialog(@"Missing CF Key", @"No CurseForge API key provided. Switching to Modrinth.");
+                self.apiSegmentControl.selectedSegmentIndex = 1;
+                [self updateSearchResults];
+            });
+            return;
         }
-        
+        [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil) completion:^(NSMutableArray * _Nullable results, NSError * _Nullable error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (results) {
+                    self.list = results;
+                    [self.tableView reloadData];
+                } else if (error) {
+                    showDialog(localize(@"Error", nil), error.localizedDescription);
+                }
+                [self switchToReadyState];
+            });
+        }];
+    } else {
+        // For Modrinth, using existing synchronous behavior.
+        NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
+        NSError *searchError = self.modrinth.lastError;
         dispatch_async(dispatch_get_main_queue(), ^{
             if (results) {
                 self.list = results;
@@ -201,7 +206,7 @@
             }
             [self switchToReadyState];
         });
-    });
+    }
 }
 
 #pragma mark - TableView DataSource
@@ -248,17 +253,26 @@
     NSMutableDictionary *item = [self.list objectAtIndex:indexPath.row];
     
     if (![item[@"versionDetailsLoaded"] boolValue]) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-                [self.curseForge loadDetailsOfMod:item];
-            } else {
+        if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+            [self.curseForge loadDetailsOfMod:item completion:^(NSError * _Nullable error) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (error) {
+                        showDialog(localize(@"Error", nil), error.localizedDescription);
+                    } else {
+                        item[@"versionDetailsLoaded"] = @(YES);
+                        [self showDetails:item atIndexPath:indexPath];
+                    }
+                });
+            }];
+        } else {
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 [self.modrinth loadDetailsOfMod:item];
-            }
-            item[@"versionDetailsLoaded"] = @(YES);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self showDetails:item atIndexPath:indexPath];
+                item[@"versionDetailsLoaded"] = @(YES);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self showDetails:item atIndexPath:indexPath];
+                });
             });
-        });
+        }
     } else {
         [self showDetails:item atIndexPath:indexPath];
     }
@@ -313,11 +327,19 @@
             [imgData writeToFile:tmpIconPath atomically:YES];
             
             if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-                [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i];
+                [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i completion:^(NSError * _Nullable error) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (error) {
+                            showDialog(localize(@"Error", nil), error.localizedDescription);
+                        } else {
+                            [self actionClose];
+                        }
+                    });
+                }];
             } else {
                 [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
+                [self actionClose];
             }
-            [self actionClose];
         }];
         [alert addAction:versionAction];
     }];
