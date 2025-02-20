@@ -12,8 +12,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 @interface CurseForgeAPI ()
 // New property to hold the modpack zip URL for fallback.
 @property (nonatomic, strong) NSString *fallbackZipUrl;
-// A parent view controller used for presenting the Safari view.
-@property (nonatomic, weak) UIViewController *parentViewController;
 @end
 
 @implementation CurseForgeAPI
