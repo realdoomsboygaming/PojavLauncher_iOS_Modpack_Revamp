@@ -223,7 +223,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     
-    NSMutableDictionary *item = [self.list objectAtIndex:indexPath.row];
+    NSMutableDictionary *item = self.list[indexPath.row];
     
     if (![item[@"versionDetailsLoaded"] boolValue]) {
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
@@ -253,21 +253,22 @@ NS_ASSUME_NONNULL_BEGIN
 
 #pragma mark - Context Menu (iOS 13+)
 
-- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView
+// Adjusted return types to be explicitly nullable
+- (UIContextMenuConfiguration * _Nullable)tableView:(UITableView *)tableView
 contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
                                     point:(CGPoint)point {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
-                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
         return self.currentMenu;
     }];
 }
 
-- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
+- (UIContextMenuConfiguration * _Nullable)contextMenuInteraction:(UIContextMenuInteraction *)interaction
                  configurationForMenuAtLocation:(CGPoint)location {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
-                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
         return self.currentMenu;
     }];
 }
@@ -294,7 +295,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
         
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
-                                                              handler:^(UIAlertAction *action) {
+                                                              handler:^(UIAlertAction * _Nonnull action) {
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             NSData *imgData = UIImagePNGRepresentation(cell.imageView.image);
             [imgData writeToFile:tmpIconPath atomically:YES];
@@ -381,4 +382,3 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 @end
 
 NS_ASSUME_NONNULL_END
-
