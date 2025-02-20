@@ -12,7 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @property (nonatomic, strong) UIMenu *currentMenu;
-// New property to keep track of the previous search text so we only update when it changes.
+// Prevent repeated searches when the text hasn't changed
 @property (nonatomic, copy) NSString *previousSearchText;
 @end
 
@@ -49,9 +49,7 @@ NS_ASSUME_NONNULL_BEGIN
     self.modrinth = [ModrinthAPI new];
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    
-    // Initialize previousSearchText to an empty string so that first search always runs.
-    self.previousSearchText = @"";
+    self.previousSearchText = @""; // so the first search always runs
     
     [self updateSearchResults];
 }
@@ -125,17 +123,16 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *currentSearchText = self.searchController.searchBar.text ?: @"";
-    // Only trigger a new search if the search text has changed or if we're loading a next page.
     if (!prevList && [self.previousSearchText isEqualToString:currentSearchText]) {
-        return;
+        return; // no need to search again
     }
-    // Update the stored previous search text.
     self.previousSearchText = currentSearchText;
     self.filters[@"name"] = currentSearchText;
     
     [self switchToLoadingState];
     
     if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+        // CurseForge
         if (!self.curseForge) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self switchToReadyState];
@@ -145,7 +142,9 @@ NS_ASSUME_NONNULL_BEGIN
             });
             return;
         }
-        [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil) completion:^(NSMutableArray * _Nullable results, NSError * _Nullable error) {
+        [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)
+                                   completion:^(NSMutableArray * _Nullable results, NSError * _Nullable error)
+        {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
                     self.list = results;
@@ -157,8 +156,10 @@ NS_ASSUME_NONNULL_BEGIN
             });
         }];
     } else {
+        // Modrinth
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
+            NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters
+                                                     previousPageResult:(prevList ? self.list : nil)];
             NSError *searchError = self.modrinth.lastError;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
@@ -203,6 +204,7 @@ NS_ASSUME_NONNULL_BEGIN
     BOOL usingCurseForge = (self.apiSegmentControl.selectedSegmentIndex == 0);
     BOOL reachedLastPage = usingCurseForge ? self.curseForge.reachedLastPage : self.modrinth.reachedLastPage;
     if (!reachedLastPage && indexPath.row == self.list.count - 1) {
+        // Trigger next page
         [self loadSearchResultsWithPrevList:YES];
     }
     
@@ -248,7 +250,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
                                     point:(CGPoint)point {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
-                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
         return self.currentMenu;
     }];
 }
@@ -257,7 +259,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
                  configurationForMenuAtLocation:(CGPoint)location {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
-                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
         return self.currentMenu;
     }];
 }
@@ -273,17 +275,21 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     
     NSArray *versionNames = details[@"versionNames"];
     NSArray *mcVersionNames = details[@"mcVersionNames"];
-    if (![versionNames isKindOfClass:[NSArray class]] || ![mcVersionNames isKindOfClass:[NSArray class]]) {
+    if (![versionNames isKindOfClass:[NSArray class]] ||
+        ![mcVersionNames isKindOfClass:[NSArray class]]) {
         return;
     }
     
     [versionNames enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *mcVersion = (i < mcVersionNames.count ? mcVersionNames[i] : @"");
-        NSString *fullText = ([name rangeOfString:mcVersion].location != NSNotFound ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
+        NSString *fullText = ([name rangeOfString:mcVersion].location != NSNotFound
+                            ? name
+                            : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
         
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
-                                                              handler:^(UIAlertAction * _Nonnull action) {
+                                                              handler:^(UIAlertAction * _Nonnull action)
+        {
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             NSData *imgData = UIImagePNGRepresentation(cell.imageView.image);
             [imgData writeToFile:tmpIconPath atomically:YES];
@@ -322,7 +328,8 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 #pragma mark - UI State Management
 
 - (void)switchToLoadingState {
-    UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc]
+                                          initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     [indicator startAnimating];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:indicator];
     
@@ -355,7 +362,8 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     if (!url) return;
     
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url
-                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error)
+    {
         if (!error && data) {
             UIImage *img = [UIImage imageWithData:data];
             dispatch_async(dispatch_get_main_queue(), ^{
