@@ -5,7 +5,7 @@
 #import "utils.h"
 #import "config.h"
 
-// The imports below might be redundant given the .h includes, but this is okay
+// The imports below might be redundant, but that’s okay
 #import "modpack/CurseForgeAPI.h"
 #import "modpack/ModrinthAPI.h"
 
@@ -18,55 +18,113 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    // We already inherit from UITableViewController,
-    // so self.tableView is the main view. By default,
-    // UITableViewController sets self.view = self.tableView in its init.
-    // (This is how UITableViewController is designed.)
-    //
-    // => If you add an additional table view, or do "self.view = [UIView new]"
-    //    inside a UITableViewController, you'd risk confusion or subview errors.
-    //
-    // So simply ensure we do NOT reassign self.view or do a second "addSubview:"
-    // for that same table. We'll just configure the existing self.tableView.
-
+    // Setup table view (since we’re a UITableViewController)
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
 
     // Create and configure a search controller
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.searchController.searchResultsUpdater = self; // We'll handle updates
+    self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     
-    // For iOS >= 11, this is valid:
+    // iOS 11+ style:
     self.navigationItem.searchController = self.searchController;
     
-    // Initialize our API objects
-    self.modrinth = [ModrinthAPI new];
-    NSString *key = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
-    if (key.length > 0) {
-        self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
-    }
-    
-    // Segmented control for switching between CF and Modrinth
+    // Create the segmented control for selecting “CurseForge” or “Modrinth”
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
-    self.apiSegmentControl.selectedSegmentIndex = 0;
+    self.apiSegmentControl.selectedSegmentIndex = 0; // Default to CurseForge
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
     [self.apiSegmentControl addTarget:self
                                action:@selector(apiSegmentChanged:)
                      forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
     
-    // Set up filters
+    // Attempt to load stored CF key and initialize the CF object if present
+    NSString *storedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
+    if (storedKey.length > 0) {
+        self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:storedKey];
+    } else {
+        // Prompt the user for a key right away if we’re on the CF tab
+        if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+            [self promptForCurseForgeAPIKey];
+        }
+        // If the user later switches to CF, we’ll prompt again inside apiSegmentChanged:
+    }
+    
+    // Initialize our Modrinth API
+    self.modrinth = [ModrinthAPI new];
+    
+    // Create a dictionary for our search filters
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
+    
+    // Fallback image for cells with no project icon
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     
     // Trigger initial search
     [self updateSearchResults];
 }
 
+#pragma mark - Prompt for CF key if missing
+
+- (void)promptForCurseForgeAPIKey {
+    // iOS 8+ (including 14) supports UIAlertController with text fields
+    UIAlertController *alert =
+      [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
+                                          message:@"Please enter your CurseForge API key"
+                                   preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        textField.placeholder = @"Your CF API Key here";
+        textField.secureTextEntry = NO; // set YES if you want it masked
+    }];
+    
+    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction * _Nonnull action)
+    {
+        NSString *key = alert.textFields.firstObject.text ?: @"";
+        if (key.length > 0) {
+            // Store it
+            [[NSUserDefaults standardUserDefaults] setObject:key forKey:@"CURSEFORGE_API_KEY"];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            
+            // Instantiate the CF object
+            self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
+            // Re-run the search in case user typed something
+            [self updateSearchResults];
+        } else {
+            // If user provided no key, you might want to default to Modrinth
+            // or just allow “empty” CF usage. Example:
+            self.apiSegmentControl.selectedSegmentIndex = 1; // Switch to Modrinth
+            [self updateSearchResults];
+        }
+    }];
+    [alert addAction:okAction];
+    
+    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
+                                                           style:UIAlertActionStyleCancel
+                                                         handler:^(UIAlertAction * _Nonnull action)
+    {
+        // If the user cancels, we’ll just switch to Modrinth automatically
+        self.apiSegmentControl.selectedSegmentIndex = 1;
+        [self updateSearchResults];
+    }];
+    [alert addAction:cancelAction];
+    
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 #pragma mark - UISegmentedControl Action
 
 - (void)apiSegmentChanged:(UISegmentedControl *)sender {
+    // If switching to CF but no key present, prompt
+    if (sender.selectedSegmentIndex == 0) {
+        NSString *key = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
+        if (!key || key.length == 0) {
+            [self promptForCurseForgeAPIKey];
+            return; // or let the prompt handle the rest
+        }
+    }
+    
     [self.list removeAllObjects];
     [self.tableView reloadData];
     [self updateSearchResults];
@@ -91,25 +149,37 @@
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text ?: @"";
-    NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]] ?
-                              self.filters[@"name"] : @"");
+    NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]]
+                              ? self.filters[@"name"] : @"");
     if (!prevList && [previousName isEqualToString:name]) {
         return;
     }
     
     [self switchToLoadingState];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        
         self.filters[@"name"] = name;
         NSError *searchError = nil;
         NSMutableArray *results = nil;
         
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-            // CurseForge
+            // Using CurseForge
+            if (!self.curseForge) {
+                // If we got here but still have no CF instance, bail out
+                // (or show an error). For safety:
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self switchToReadyState];
+                    showDialog(@"Missing CF Key", @"No CurseForge API key provided. Switching to Modrinth.");
+                    self.apiSegmentControl.selectedSegmentIndex = 1;
+                    [self updateSearchResults];
+                });
+                return;
+            }
             results = [self.curseForge searchModWithFilters:self.filters
                                          previousPageResult:(prevList ? self.list : nil)];
             searchError = self.curseForge.lastError;
         } else {
-            // Modrinth
+            // Using Modrinth
             results = [self.modrinth searchModWithFilters:self.filters
                                        previousPageResult:(prevList ? self.list : nil)];
             searchError = self.modrinth.lastError;
@@ -159,7 +229,7 @@
         cell.imageView.image = self.fallbackImage;
     }
     
-    // Pagination support
+    // Handle “infinite scrolling” if the API supports pages
     BOOL usingCurseForge = (self.apiSegmentControl.selectedSegmentIndex == 0);
     BOOL reachedLastPage = usingCurseForge ? self.curseForge.reachedLastPage
                                            : self.modrinth.reachedLastPage;
@@ -183,19 +253,17 @@
    contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
                                        point:(CGPoint)point
 {
-    return [UIContextMenuConfiguration
-        configurationWithIdentifier:nil
-        previewProvider:nil
-        actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions)
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil
+                                                     previewProvider:nil
+                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions)
     {
-        return self.currentMenu; // Provide custom menu or dynamically build
+        return self.currentMenu;
     }];
 }
 
 - (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
                          configurationForMenuAtLocation:(CGPoint)location
 {
-    // Return a configuration that yields self.currentMenu
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
                                                       actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions)
@@ -213,7 +281,7 @@
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     
-    NSArray *versionNames = details[@"versionNames"];
+    NSArray *versionNames   = details[@"versionNames"];
     NSArray *mcVersionNames = details[@"mcVersionNames"];
     
     if (![versionNames isKindOfClass:[NSArray class]] ||
@@ -224,28 +292,24 @@
     
     [versionNames enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *mcVersion = (i < mcVersionNames.count ? mcVersionNames[i] : @"");
-        NSString *nameWithVersion = ([name containsString:mcVersion]
-                                     ? name
-                                     : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
+        NSString *fullText = ([name rangeOfString:mcVersion].location != NSNotFound
+                            ? name
+                            : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
         
-        UIAlertAction *versionAction = [UIAlertAction actionWithTitle:nameWithVersion
+        UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
                                                               handler:^(UIAlertAction * _Nonnull action)
         {
-            // Save the cell image to a temp location
+            // Save the cell’s image to a temp location for the final profile’s icon
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
-            NSData *imageData = UIImagePNGRepresentation(cell.imageView.image);
-            [imageData writeToFile:tmpIconPath atomically:YES];
+            NSData *imgData = UIImagePNGRepresentation(cell.imageView.image);
+            [imgData writeToFile:tmpIconPath atomically:YES];
             
-            // Install
+            // Install the chosen version
             if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-                // CurseForge
-                [self.curseForge installModpackFromDetail:self.list[indexPath.row]
-                                                   atIndex:i];
+                [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i];
             } else {
-                // Modrinth
-                [self.modrinth installModpackFromDetail:self.list[indexPath.row]
-                                                 atIndex:i];
+                [self.modrinth installModpackFromDetail:self.list[indexPath.row] atIndex:i];
             }
             [self actionClose];
         }];
@@ -256,7 +320,7 @@
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     
-    // On iPad, need a popover anchor
+    // iPad popover anchor
     if (alert.popoverPresentationController) {
         alert.popoverPresentationController.sourceView = cell;
         alert.popoverPresentationController.sourceRect = cell.bounds;
@@ -274,20 +338,20 @@
     [indicator startAnimating];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:indicator];
     
-    // Lock the UI so user can't close
-    self.navigationController.modalInPresentation = YES; // iOS 13+
+    // iOS13+ property, safe for iOS14
+    self.navigationController.modalInPresentation = YES;
     self.tableView.allowsSelection = NO;
 }
 
 - (void)switchToReadyState {
+    // Revert to a Close button
     UIActivityIndicatorView *indicator = (id)self.navigationItem.rightBarButtonItem.customView;
     [indicator stopAnimating];
     
-    // iOS 13+ has UIBarButtonSystemItemClose, safe for iOS 14
     UIBarButtonItem *closeButton = [[UIBarButtonItem alloc]
-                                    initWithBarButtonSystemItem:UIBarButtonSystemItemClose
-                                                         target:self
-                                                         action:@selector(actionClose)];
+        initWithBarButtonSystemItem:UIBarButtonSystemItemClose
+                             target:self
+                             action:@selector(actionClose)];
     self.navigationItem.rightBarButtonItem = closeButton;
     
     self.navigationController.modalInPresentation = NO;
@@ -304,11 +368,9 @@
     NSURL *url = [NSURL URLWithString:urlString];
     if (!url) return;
     
-    NSURLSessionDataTask *task =
-      [[NSURLSession sharedSession] dataTaskWithURL:url
-                                  completionHandler:^(NSData *data,
-                                                      NSURLResponse *response,
-                                                      NSError *error)
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+      dataTaskWithURL:url
+    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error)
     {
         if (!error && data) {
             UIImage *img = [UIImage imageWithData:data];
