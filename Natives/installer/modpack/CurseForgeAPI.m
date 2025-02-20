@@ -9,6 +9,7 @@
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
+#define CURSEFORGE_PAGINATION_SIZE 50
 
 @interface CurseForgeAPI ()
 @property (nonatomic, copy) NSString *apiKey;
@@ -68,8 +69,10 @@
         NSString *query = searchFilters[@"name"] ?: @"";
         NSMutableDictionary *params = [@{
             @"gameId": @(kCurseForgeGameIDMinecraft),
-            @"classId": (([searchFilters[@"isModpack"] boolValue]) ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod)),
+            @"classId": ([searchFilters[@"isModpack"] boolValue] ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod)),
             @"searchFilter": query,
+            @"sortField": @(1),       // Using relevancy sort, as in Android
+            @"sortOrder": @"desc",
             @"pageSize": @(limit),
             @"index": @(prevResult.count)
         } mutableCopy];
@@ -116,32 +119,43 @@
     });
 }
 
+// Pagination-based details loading, similar to the Android port.
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item
               completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *modId = [NSString stringWithFormat:@"%@", item[@"id"]];
-        NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", modId] params:nil];
-        if (!response) {
-            if (completion) {
+        NSMutableArray *allDetails = [NSMutableArray new];
+        NSInteger index = 0;
+        NSInteger pageSize = CURSEFORGE_PAGINATION_SIZE;
+        while (YES) {
+            NSDictionary *params = @{@"index": @(index), @"pageSize": @(pageSize)};
+            NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", item[@"id"]] params:params];
+            if (!response) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     completion(self.lastError);
                 });
+                return;
             }
-            return;
+            NSArray *data = response[@"data"];
+            if (!data) break;
+            for (NSDictionary *file in data) {
+                if ([file[@"isServerPack"] boolValue]) continue;
+                [allDetails addObject:file];
+            }
+            if (data.count < pageSize) break;
+            index += data.count;
         }
-        NSArray *files = response[@"data"];
+        
         NSMutableArray *names = [NSMutableArray new];
         NSMutableArray *mcNames = [NSMutableArray new];
         NSMutableArray *urls = [NSMutableArray new];
         NSMutableArray *hashes = [NSMutableArray new];
         NSMutableArray *sizes = [NSMutableArray new];
-        
-        [files enumerateObjectsUsingBlock:^(NSDictionary *file, NSUInteger i, BOOL *stop) {
+        for (NSDictionary *file in allDetails) {
             [names addObject:[NSString stringWithFormat:@"%@", file[@"fileName"] ?: @""]];
             id versions = file[@"gameVersion"] ?: file[@"gameVersionList"];
             NSString *gameVersion = @"";
             if ([versions isKindOfClass:[NSArray class]] && [versions count] > 0) {
-                gameVersion = [NSString stringWithFormat:@"%@", versions[0]];
+                gameVersion = [NSString stringWithFormat:@"%@", ((NSArray *)versions)[0]];
             } else if ([versions isKindOfClass:[NSString class]]) {
                 gameVersion = [NSString stringWithFormat:@"%@", versions];
             }
@@ -158,26 +172,24 @@
                 }
             }
             [hashes addObject:sha1];
-        }];
-        
+        }
         item[@"versionNames"] = names;
         item[@"mcVersionNames"] = mcNames;
-        item[@"versionSizes"] = sizes;
         item[@"versionUrls"] = urls;
         item[@"versionHashes"] = hashes;
+        item[@"versionSizes"] = sizes;
         item[@"versionDetailsLoaded"] = @(YES);
         
-        if (completion) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil);
-            });
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil);
+        });
     });
 }
 
 - (void)installModpackFromDetail:(NSDictionary *)modDetail
                          atIndex:(NSUInteger)selectedVersion
                       completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
+    // For now, we use the superclass implementation.
     [super installModpackFromDetail:modDetail atIndex:selectedVersion];
     if (completion) {
         completion(nil);
