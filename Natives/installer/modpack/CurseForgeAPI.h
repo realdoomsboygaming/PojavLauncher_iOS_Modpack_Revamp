@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "ModpackAPI.h"
-
+NS_ASSUME_NONNULL_END
 @interface CurseForgeAPI : ModpackAPI
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
@@ -17,3 +17,4 @@
 @property (nonatomic, weak) UIViewController *parentViewController;
 
 @end
+NS_ASSUME_NONNULL_END
