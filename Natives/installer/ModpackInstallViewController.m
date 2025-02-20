@@ -4,8 +4,6 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "config.h"
-
-// These imports may be redundant, but are included for completeness.
 #import "modpack/CurseForgeAPI.h"
 #import "modpack/ModrinthAPI.h"
 
@@ -21,27 +19,21 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    // Ensure the search controller is presented within this view controller’s bounds.
     self.definesPresentationContext = YES;
-    
-    // Setup table view
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     
-    // Create and configure a search controller
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
-    // Create the segmented control for selecting "CurseForge" or "Modrinth"
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
-    self.apiSegmentControl.selectedSegmentIndex = 0; // Default to CurseForge
+    self.apiSegmentControl.selectedSegmentIndex = 0;
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
     [self.apiSegmentControl addTarget:self action:@selector(apiSegmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
     
-    // Attempt to load stored CF key and initialize the CF object if present
     NSString *storedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (storedKey.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:storedKey];
@@ -52,16 +44,10 @@ NS_ASSUME_NONNULL_BEGIN
         }
     }
     
-    // Initialize our Modrinth API
     self.modrinth = [ModrinthAPI new];
-    
-    // Create a dictionary for our search filters
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
-    
-    // Fallback image for cells with no project icon
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     
-    // Trigger initial search
     [self updateSearchResults];
 }
 
@@ -114,7 +100,6 @@ NS_ASSUME_NONNULL_BEGIN
             return;
         }
     }
-    
     [self.list removeAllObjects];
     [self.tableView reloadData];
     [self updateSearchResults];
@@ -135,10 +120,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *name = self.searchController.searchBar.text ?: @"";
-    // Update filters with current search text
     self.filters[@"name"] = name;
     
-    NSString *previousName = ([self.filters[@"name"] isKindOfClass:[NSString class]] ? self.filters[@"name"] : @"");
+    NSString *previousName = self.filters[@"name"];
     if (!prevList && [previousName isEqualToString:name]) {
         return;
     }
@@ -146,7 +130,6 @@ NS_ASSUME_NONNULL_BEGIN
     [self switchToLoadingState];
     
     if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-        // Use asynchronous CurseForge API method.
         if (!self.curseForge) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self switchToReadyState];
@@ -168,7 +151,6 @@ NS_ASSUME_NONNULL_BEGIN
             });
         }];
     } else {
-        // For Modrinth, dispatch the synchronous search off the main thread.
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
             NSError *searchError = self.modrinth.lastError;
@@ -225,7 +207,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    
     NSMutableDictionary *item = self.list[indexPath.row];
     
     if (![item[@"versionDetailsLoaded"] boolValue]) {
@@ -286,7 +267,6 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     
     NSArray *versionNames = details[@"versionNames"];
     NSArray *mcVersionNames = details[@"mcVersionNames"];
-    
     if (![versionNames isKindOfClass:[NSArray class]] || ![mcVersionNames isKindOfClass:[NSArray class]]) {
         return;
     }
