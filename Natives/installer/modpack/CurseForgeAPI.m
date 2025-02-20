@@ -12,20 +12,15 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 @interface CurseForgeAPI ()
 // Used for fallback integrated browser when errors occur.
 @property (nonatomic, strong) NSString *fallbackZipUrl;
-// Pending properties to hold manifest and download info until the user presses "Play"
-@property (nonatomic, strong) NSDictionary *pendingManifest;
-@property (nonatomic, strong) NSString *pendingPackagePath;
-@property (nonatomic, strong) NSString *pendingDestinationPath;
-@property (nonatomic, strong) NSDictionary *pendingModpackDetail;
+// Pending properties to hold manifest and download info until the user taps "Play"
+@property (nonatomic, strong, nullable) NSDictionary *pendingManifest;
+@property (nonatomic, strong, nullable) NSString *pendingPackagePath;
+@property (nonatomic, strong, nullable) NSString *pendingDestinationPath;
+@property (nonatomic, strong, nullable) NSDictionary *pendingModpackDetail;
 @property (nonatomic, assign) NSInteger pendingModpackIndex;
-
-// Private helper method.
-- (NSString *)getSha1FromFileDict:(NSDictionary *)fileDict;
 @end
 
 @implementation CurseForgeAPI
-
-#pragma mark - Init
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey {
     self = [super init];
@@ -44,9 +39,11 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     return self;
 }
 
-#pragma mark - Generic GET Endpoint
+#pragma mark - Asynchronous Networking
 
-- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
+- (void)getEndpoint:(NSString *)endpoint
+             params:(NSDictionary *)params
+         completion:(void(^)(id _Nullable result, NSError * _Nullable error))completion {
     NSString *baseURL = @"https://api.curseforge.com/v1";
     NSString *fullURL = [baseURL stringByAppendingPathComponent:endpoint];
     
@@ -64,42 +61,28 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     [request setValue:self.apiKey forHTTPHeaderField:@"x-api-key"];
     [request setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
     
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    __block id resultObj = nil;
-    __block NSError *reqError = nil;
-    
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
-      dataTaskWithRequest:request
-        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error)
-    {
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request
+                                                                 completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
-            reqError = error;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
         } else if (data) {
             NSError *jsonErr = nil;
             id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonErr];
-            if (jsonErr) {
-                reqError = jsonErr;
-            } else {
-                resultObj = parsed;
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(parsed, jsonErr);
+            });
         }
-        dispatch_semaphore_signal(sem);
     }];
-    
     [task resume];
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-    
-    if (reqError) {
-        self.lastError = reqError;
-        return nil;
-    }
-    return resultObj;
 }
 
-#pragma mark - Search & Details
+#pragma mark - Search Mods/Modpacks
 
-- (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters
-                      previousPageResult:(NSMutableArray *)previousResults {
+- (void)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters
+         previousPageResult:(NSMutableArray * _Nullable)previousResults
+                 completion:(void(^)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion {
     NSMutableDictionary *params = [NSMutableDictionary dictionary];
     params[@"gameId"] = @(kCurseForgeGameIDMinecraft);
     
@@ -127,199 +110,238 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         params[@"gameVersion"] = mcVersion;
     }
     
-    NSDictionary *response = [self getEndpoint:@"mods/search" params:params];
-    if (!response) return nil;
-    
-    NSArray *dataArray = response[@"data"];
-    if (![dataArray isKindOfClass:[NSArray class]]) return nil;
-    
-    NSDictionary *paginationInfo = response[@"pagination"];
-    NSUInteger totalCount = 0;
-    if ([paginationInfo isKindOfClass:[NSDictionary class]]) {
-        NSNumber *tc = paginationInfo[@"totalCount"];
-        if ([tc isKindOfClass:[NSNumber class]]) {
-            totalCount = tc.unsignedIntegerValue;
-        }
-    }
-    
-    NSMutableArray *results = previousResults ?: [NSMutableArray array];
-    for (NSDictionary *modDict in dataArray) {
-        if (![modDict isKindOfClass:[NSDictionary class]]) continue;
-        
-        id allowDist = modDict[@"allowModDistribution"];
-        if ([allowDist isKindOfClass:[NSNumber class]] && ![allowDist boolValue]) {
-            NSLog(@"[CurseForgeAPI] Skipping modpack because allowModDistribution=false");
-            continue;
+    [self getEndpoint:@"mods/search" params:params completion:^(id result, NSError *error) {
+        if (error || !result) {
+            self.lastError = error;
+            if (completion) completion(nil, error);
+            return;
         }
         
-        id modIdValue = modDict[@"id"];
-        NSString *modId = @"";
-        if ([modIdValue respondsToSelector:@selector(stringValue)]) {
-            modId = [modIdValue stringValue];
-        }
-        NSString *title = ([modDict[@"name"] isKindOfClass:[NSString class]] ? modDict[@"name"] : @"");
-        NSString *summary = ([modDict[@"summary"] isKindOfClass:[NSString class]] ? modDict[@"summary"] : @"");
-        NSString *imageUrl = @"";
-        NSDictionary *logoDict = ([modDict[@"logo"] isKindOfClass:[NSDictionary class]] ? modDict[@"logo"] : nil);
-        if ([logoDict[@"thumbnailUrl"] isKindOfClass:[NSString class]]) {
-            imageUrl = logoDict[@"thumbnailUrl"];
+        NSMutableArray *resultsArray = previousResults ?: [NSMutableArray array];
+        NSArray *dataArray = result[@"data"];
+        if (![dataArray isKindOfClass:[NSArray class]]) {
+            if (completion) {
+                completion(nil, [NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Malformed response"}]);
+            }
+            return;
         }
         
-        NSMutableDictionary *item = [@{
-            @"apiSource": @(0),
-            @"isModpack": @(isModpack),
-            @"id": modId,
-            @"title": title,
-            @"description": summary,
-            @"imageUrl": imageUrl
-        } mutableCopy];
+        for (NSDictionary *modDict in dataArray) {
+            if (![modDict isKindOfClass:[NSDictionary class]]) continue;
+            
+            id allowDist = modDict[@"allowModDistribution"];
+            if ([allowDist isKindOfClass:[NSNumber class]] && ![allowDist boolValue]) {
+                NSLog(@"[CurseForgeAPI] Skipping modpack because allowModDistribution=false");
+                continue;
+            }
+            
+            NSString *modId = @"";
+            id modIdValue = modDict[@"id"];
+            if ([modIdValue respondsToSelector:@selector(stringValue)]) {
+                modId = [modIdValue stringValue];
+            }
+            NSString *title = ([modDict[@"name"] isKindOfClass:[NSString class]] ? modDict[@"name"] : @"");
+            NSString *summary = ([modDict[@"summary"] isKindOfClass:[NSString class]] ? modDict[@"summary"] : @"");
+            NSString *imageUrl = @"";
+            NSDictionary *logoDict = ([modDict[@"logo"] isKindOfClass:[NSDictionary class]] ? modDict[@"logo"] : nil);
+            if ([logoDict[@"thumbnailUrl"] isKindOfClass:[NSString class]]) {
+                imageUrl = logoDict[@"thumbnailUrl"];
+            }
+            
+            NSMutableDictionary *item = [@{
+                @"apiSource": @(0),
+                @"isModpack": @(isModpack),
+                @"id": modId,
+                @"title": title,
+                @"description": summary,
+                @"imageUrl": imageUrl
+            } mutableCopy];
+            [resultsArray addObject:item];
+        }
         
-        [results addObject:item];
-    }
-    
-    self.previousOffset += dataArray.count;
-    if (dataArray.count < limit || results.count >= totalCount) {
-        self.reachedLastPage = YES;
-    }
-    
-    self.lastSearchTerm = searchName;
-    return results;
+        NSUInteger totalCount = 0;
+        NSDictionary *paginationInfo = result[@"pagination"];
+        if ([paginationInfo isKindOfClass:[NSDictionary class]]) {
+            NSNumber *tc = paginationInfo[@"totalCount"];
+            if ([tc isKindOfClass:[NSNumber class]]) {
+                totalCount = tc.unsignedIntegerValue;
+            }
+        }
+        
+        self.previousOffset += [dataArray count];
+        if ([dataArray count] < limit || [resultsArray count] >= totalCount) {
+            self.reachedLastPage = YES;
+        }
+        self.lastSearchTerm = searchName;
+        if (completion) completion(resultsArray, nil);
+    }];
 }
 
-- (void)loadDetailsOfMod:(NSMutableDictionary *)item {
+#pragma mark - Load Details
+
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item completion:(void(^)(NSError * _Nullable error))completion {
     NSString *modId = item[@"id"];
-    if (modId.length == 0) return;
+    if (modId.length == 0) {
+        if (completion) {
+            completion([NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Invalid mod ID"}]);
+        }
+        return;
+    }
     
-    NSMutableArray<NSDictionary *> *allFiles = [NSMutableArray array];
-    NSInteger pageOffset = 0;
-    BOOL endReached = NO;
+    __block NSMutableArray *allFiles = [NSMutableArray array];
+    __block NSInteger pageOffset = 0;
+    __block BOOL endReached = NO;
     
-    while (!endReached) {
+    void (^loadPage)(void);
+    __weak typeof(self) weakSelf = self;
+    loadPage = ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
         NSDictionary *params = @{@"index": @(pageOffset), @"pageSize": @(50)};
         NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files", modId];
-        NSDictionary *resp = [self getEndpoint:endpoint params:params];
-        if (!resp) return;
-        NSArray *data = resp[@"data"];
-        if (![data isKindOfClass:[NSArray class]]) return;
-        
-        int addedCount = 0;
-        for (NSDictionary *fileInfo in data) {
-            if (![fileInfo isKindOfClass:[NSDictionary class]]) continue;
-            if ([fileInfo[@"isServerPack"] boolValue]) continue;
-            [allFiles addObject:fileInfo];
-            addedCount++;
-        }
-        if (data.count < 50) {
-            endReached = YES;
-        } else {
-            pageOffset += data.count;
-        }
-        if (addedCount == 0 && data.count == 50) break;
-    }
+        [strongSelf getEndpoint:endpoint params:params completion:^(id result, NSError *error) {
+            if (error || !result) {
+                if (completion) completion(error);
+                return;
+            }
+            NSArray *data = result[@"data"];
+            if (![data isKindOfClass:[NSArray class]]) {
+                if (completion) {
+                    completion([NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Malformed file data"}]);
+                }
+                return;
+            }
+            int addedCount = 0;
+            for (NSDictionary *fileInfo in data) {
+                if (![fileInfo isKindOfClass:[NSDictionary class]]) continue;
+                if ([fileInfo[@"isServerPack"] boolValue]) continue;
+                [allFiles addObject:fileInfo];
+                addedCount++;
+            }
+            if ([data count] < 50) {
+                endReached = YES;
+            } else {
+                pageOffset += [data count];
+            }
+            if (!endReached && addedCount == 0 && [data count] == 50) {
+                endReached = YES;
+            }
+            if (!endReached) {
+                loadPage();
+            } else {
+                NSMutableArray<NSString *> *versionNames = [NSMutableArray arrayWithCapacity:allFiles.count];
+                NSMutableArray<NSString *> *mcVersions = [NSMutableArray arrayWithCapacity:allFiles.count];
+                NSMutableArray<NSString *> *versionUrls = [NSMutableArray arrayWithCapacity:allFiles.count];
+                NSMutableArray<NSString *> *hashes = [NSMutableArray arrayWithCapacity:allFiles.count];
+                
+                for (NSDictionary *fileDict in allFiles) {
+                    NSString *displayName = (fileDict[@"displayName"] ?: @"");
+                    [versionNames addObject:displayName];
+                    
+                    NSArray *gv = ([fileDict[@"gameVersions"] isKindOfClass:[NSArray class]] ? fileDict[@"gameVersions"] : @[]);
+                    NSString *firstMC = (gv.count > 0 ? gv.firstObject : @"");
+                    [mcVersions addObject:firstMC];
+                    
+                    NSString *dlUrl = fileDict[@"downloadUrl"];
+                    if (![dlUrl isKindOfClass:[NSString class]]) {
+                        dlUrl = @"";
+                    }
+                    [versionUrls addObject:dlUrl];
+                    
+                    NSString *sha1 = [strongSelf getSha1FromFileDict:fileDict];
+                    [hashes addObject:(sha1 ?: @"")];
+                }
+                item[@"versionNames"] = versionNames;
+                item[@"mcVersionNames"] = mcVersions;
+                item[@"versionUrls"] = versionUrls;
+                item[@"versionHashes"] = hashes;
+                item[@"versionDetailsLoaded"] = @(YES);
+                if (completion) completion(nil);
+            }
+        }];
+    };
     
-    NSMutableArray<NSString *> *versionNames = [NSMutableArray arrayWithCapacity:allFiles.count];
-    NSMutableArray<NSString *> *mcVersions = [NSMutableArray arrayWithCapacity:allFiles.count];
-    NSMutableArray<NSString *> *versionUrls = [NSMutableArray arrayWithCapacity:allFiles.count];
-    NSMutableArray<NSString *> *hashes = [NSMutableArray arrayWithCapacity:allFiles.count];
-    
-    for (NSDictionary *fileDict in allFiles) {
-        NSString *displayName = (fileDict[@"displayName"] ?: @"");
-        [versionNames addObject:displayName];
-        
-        NSArray *gv = ([fileDict[@"gameVersions"] isKindOfClass:[NSArray class]] ? fileDict[@"gameVersions"] : @[]);
-        NSString *firstMC = (gv.count > 0 ? gv.firstObject : @"");
-        [mcVersions addObject:firstMC];
-        
-        NSString *dlUrl = fileDict[@"downloadUrl"];
-        if (![dlUrl isKindOfClass:[NSString class]]) {
-            dlUrl = @"";
-        }
-        [versionUrls addObject:dlUrl];
-        
-        NSString *sha1 = [self getSha1FromFileDict:fileDict];
-        [hashes addObject:(sha1 ?: @"")];
-    }
-    
-    item[@"versionNames"] = versionNames;
-    item[@"mcVersionNames"] = mcVersions;
-    item[@"versionUrls"] = versionUrls;
-    item[@"versionHashes"] = hashes;
-    item[@"versionDetailsLoaded"] = @(YES);
+    loadPage();
 }
 
 #pragma mark - Install Modpack
 
-- (void)installModpackFromDetail:(NSDictionary *)modpackDetail atIndex:(NSInteger)selectedIndex {
-    // Retrieve the modpack zip URL from the mod detail.
-    NSArray *urls = modpackDetail[@"versionUrls"];
-    if (![urls isKindOfClass:[NSArray class]] || selectedIndex < 0 || selectedIndex >= urls.count) {
-        NSLog(@"[CurseForgeAPI] No valid versionUrls or invalid index %ld", (long)selectedIndex);
+- (void)installModpackFromDetail:(NSDictionary *)detail
+                         atIndex:(NSInteger)index
+                      completion:(void(^)(NSError * _Nullable error))completion {
+    NSArray *urls = detail[@"versionUrls"];
+    if (![urls isKindOfClass:[NSArray class]] || index < 0 || index >= urls.count) {
+        NSLog(@"[CurseForgeAPI] No valid versionUrls or invalid index %ld", (long)index);
+        if (completion) {
+            completion([NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Invalid version URLs or index"}]);
+        }
         return;
     }
-    NSString *zipUrlString = urls[selectedIndex];
+    NSString *zipUrlString = urls[index];
     if (zipUrlString.length == 0) {
-        NSLog(@"[CurseForgeAPI] Empty zipUrl at index %ld", (long)selectedIndex);
-        [self fallbackOpenBrowserWithURL:zipUrlString];
+        NSLog(@"[CurseForgeAPI] Empty zipUrl at index %ld", (long)index);
+        if (completion) {
+            completion([NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Empty zip URL"}]);
+        }
         return;
     }
     NSURL *zipURL = [NSURL URLWithString:zipUrlString];
     if (!zipURL) {
         NSLog(@"[CurseForgeAPI] Could not parse zip URL: %@, falling back to browser", zipUrlString);
         [self fallbackOpenBrowserWithURL:zipUrlString];
+        if (completion) {
+            completion([NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Invalid zip URL"}]);
+        }
         return;
     }
+    
     self.fallbackZipUrl = zipUrlString;
-    
-    // Start downloading the modpack zip immediately.
-    // Capture the modpack detail and selected index in local variables.
-    NSDictionary *modpackDetailCopy = [modpackDetail copy];
-    NSInteger selectedIndexCopy = selectedIndex;
-    
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+    __weak typeof(self) weakSelf = self;
     NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:zipURL completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
         if (error) {
             NSLog(@"[CurseForgeAPI] Error downloading zip file: %@", error);
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                [strongSelf fallbackOpenBrowserWithURL:strongSelf.fallbackZipUrl];
+                if (completion) completion(error);
             });
             return;
         }
-        // Move the downloaded file to a temporary location.
         NSString *tempDir = NSTemporaryDirectory();
-        NSString *destinationFilePath = [NSString stringWithFormat:@"%@/modpack_%@", tempDir, modpackDetailCopy[@"id"]];
+        NSString *destinationFilePath = [NSString stringWithFormat:@"%@/modpack_%@", tempDir, detail[@"id"]];
         [[NSFileManager defaultManager] removeItemAtPath:destinationFilePath error:nil];
         NSError *fileError = nil;
         BOOL success = [[NSFileManager defaultManager] moveItemAtPath:location.path toPath:destinationFilePath error:&fileError];
         if (!success) {
             NSLog(@"[CurseForgeAPI] Error moving zip file: %@", fileError);
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                [strongSelf fallbackOpenBrowserWithURL:strongSelf.fallbackZipUrl];
+                if (completion) completion(fileError);
             });
             return;
         }
-        // Define a destination folder for the modpack profile.
-        NSString *customDestPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), modpackDetailCopy[@"id"]];
-        // Process the manifest to create/update the profile.
-        [self processManifestFromPackage:[NSURL fileURLWithPath:destinationFilePath] destinationPath:customDestPath downloader:nil];
+        NSString *customDestPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), detail[@"id"]];
+        [strongSelf processManifestFromPackage:[NSURL fileURLWithPath:destinationFilePath] destinationPath:customDestPath downloader:nil completion:completion];
     }];
     [downloadTask resume];
 }
 
-/// Process the modpack manifest: extract, parse, verify, and create/update the profile.
-/// Does not start subfile downloads yet.
-- (void)processManifestFromPackage:(NSURL *)zipURL destinationPath:(NSString *)destPath downloader:(MinecraftResourceDownloadTask *)downloader {
+- (void)processManifestFromPackage:(NSURL *)zipURL
+                   destinationPath:(NSString *)destPath
+                        downloader:(MinecraftResourceDownloadTask *)downloader
+                        completion:(void(^)(NSError * _Nullable error))completion {
     NSString *packagePath = zipURL.path;
-    
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error;
         UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
         if (error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (downloader) {
-                    [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Failed to open modpack package: %@", error.localizedDescription]];
+                    [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to open modpack package: %@", error.localizedDescription]];
                 }
                 [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                if (completion) completion(error);
             });
             return;
         }
@@ -328,9 +350,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         if (!manifestData || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (downloader) {
-                    [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in modpack package"];
+                    [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to parse manifest.json: %@", error.localizedDescription]];
                 }
                 [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                if (completion) completion(error);
             });
             return;
         }
@@ -338,9 +361,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         if (!manifest || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (downloader) {
-                    [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Invalid manifest.json: %@", error.localizedDescription]];
+                    [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Invalid manifest.json: %@", error.localizedDescription]];
                 }
                 [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                if (completion) completion(error);
             });
             return;
         }
@@ -354,9 +378,12 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
               [manifest[@"minecraft"][@"modLoaders"] count] > 0)) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (downloader) {
-                    [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] Manifest verification failed"];
+                    [downloader finishDownloadWithErrorString:@"Manifest verification failed"];
                 }
                 [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                if (completion) {
+                    completion([NSError errorWithDomain:@"CurseForgeAPI" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Manifest verification failed"}]);
+                }
             });
             return;
         }
@@ -399,15 +426,12 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             
             NSLog(@"[CurseForgeAPI] Profile created for modpack: %@", packName);
             
-            // Store pending info for subfile downloads.
             self.pendingManifest = manifest;
             self.pendingPackagePath = packagePath;
             self.pendingDestinationPath = destPath;
-            self.pendingModpackDetail = modpackDetail; // Use the modpackDetail captured earlier
-            self.pendingModpackIndex = selectedIndex;  // Use the selectedIndex captured earlier
             
-            // Notify the UI that the modpack is ready for play.
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackReadyForPlay" object:self];
+            if (completion) completion(nil);
         });
     });
 }
@@ -461,7 +485,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             dispatch_semaphore_signal(downloadSemaphore);
         }
         
-        // After scheduling all subfile downloads, remove the modpack zip.
         [[NSFileManager defaultManager] removeItemAtPath:self.pendingPackagePath error:nil];
         self.pendingManifest = nil;
         self.pendingPackagePath = nil;
@@ -483,7 +506,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
 }
 
-#pragma mark - Downloader for Subfiles
+#pragma mark - Helper Methods
 
 - (NSString *)getDownloadURLForProject:(NSNumber *)projID file:(NSNumber *)fileID {
     if (!projID || !fileID) {
@@ -492,22 +515,32 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
     NSDictionary *params = @{@"gameId": @(kCurseForgeGameIDMinecraft)};
     NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@/download-url", projID, fileID];
-    NSDictionary *resp = [self getEndpoint:endpoint params:params];
-    NSLog(@"getDownloadURLForProject: Response from %@: %@", endpoint, resp);
-    if (![resp isKindOfClass:[NSDictionary class]]) {
-        NSLog(@"getDownloadURLForProject: Response is not a dictionary");
-        return nil;
-    }
-    
-    id dataVal = resp[@"data"];
-    if ([dataVal isKindOfClass:[NSString class]] && ((NSString *)dataVal).length > 0) {
-        NSLog(@"getDownloadURLForProject: Retrieved URL: %@", dataVal);
-        return dataVal;
+    __block NSString *urlString = nil;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    [self getEndpoint:endpoint params:params completion:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSDictionary class]]) {
+            id dataVal = result[@"data"];
+            if ([dataVal isKindOfClass:[NSString class]] && ((NSString *)dataVal).length > 0) {
+                urlString = dataVal;
+            }
+        }
+        dispatch_semaphore_signal(sem);
+    }];
+    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    if (urlString) {
+        return urlString;
     }
     
     endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
-    NSDictionary *fallback = [self getEndpoint:endpoint params:params];
-    NSLog(@"getDownloadURLForProject: Fallback response from %@: %@", endpoint, fallback);
+    __block NSDictionary *fallback = nil;
+    dispatch_semaphore_t sem2 = dispatch_semaphore_create(0);
+    [self getEndpoint:endpoint params:params completion:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSDictionary class]]) {
+            fallback = result;
+        }
+        dispatch_semaphore_signal(sem2);
+    }];
+    dispatch_semaphore_wait(sem2, DISPATCH_TIME_FOREVER);
     NSDictionary *fallbackData = fallback[@"data"];
     if ([fallbackData isKindOfClass:[NSDictionary class]]) {
         NSNumber *fID = fallbackData[@"id"];
@@ -517,11 +550,9 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             int prefix = numericId / 1000;
             int suffix = numericId % 1000;
             NSString *constructedURL = [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%03d/%@", prefix, suffix, fileName];
-            NSLog(@"getDownloadURLForProject: Constructed fallback URL: %@", constructedURL);
             return constructedURL;
         }
     }
-    NSLog(@"getDownloadURLForProject: Could not obtain a download URL");
     return nil;
 }
 
@@ -529,7 +560,15 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     if (!projID || !fileID) return nil;
     NSDictionary *params = @{@"gameId": @(kCurseForgeGameIDMinecraft)};
     NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
-    NSDictionary *resp = [self getEndpoint:endpoint params:params];
+    __block NSDictionary *resp = nil;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    [self getEndpoint:endpoint params:params completion:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSDictionary class]]) {
+            resp = result;
+        }
+        dispatch_semaphore_signal(sem);
+    }];
+    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
     NSDictionary *data = resp[@"data"];
     if (![data isKindOfClass:[NSDictionary class]]) return nil;
     return [self getSha1FromFileDict:data];
