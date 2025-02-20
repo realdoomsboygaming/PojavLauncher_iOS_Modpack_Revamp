@@ -244,7 +244,6 @@
         
         downloader.progress.totalUnitCount = files.count;
         
-        // Enqueue each file for download
         for (NSDictionary *fileEntry in files) {
             NSNumber *projectID = fileEntry[@"projectID"];
             NSNumber *fileID = fileEntry[@"fileID"];
@@ -255,7 +254,7 @@
                 [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for project %@ file %@", projectID, fileID]];
                 return;
             } else if (!url) {
-                continue; // optional file with no URL
+                continue;
             }
             
             NSString *relativePath = fileEntry[@"path"];
@@ -271,32 +270,36 @@
             } else if (!downloader.progress.cancelled) {
                 downloader.progress.completedUnitCount++;
             } else {
-                return; // cancelled
+                return;
             }
         }
         
-        // Extract overrides directory
         [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
         if (error) {
             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", error.localizedDescription]];
             return;
         }
         
-        // Clean up the package
         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
         
-        // Extract version info from the manifest
+        // Download dependency client JSON for Fabric (if available)
+        NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
+        if (depInfo[@"json"]) {
+            NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
+            NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:0 sha:nil altName:nil toPath:jsonPath];
+            [task resume];
+        }
+        
+        // Extract version information:
         NSDictionary *minecraft = manifestDict[@"minecraft"];
         NSString *vanillaVersion = @"";
         NSString *modLoaderId = @"";
-        NSString *finalVersionString = @"";
-        
+        NSString *modLoaderVersion = @"";
         if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
             vanillaVersion = minecraft[@"version"] ?: @"";
             NSArray *modLoaders = minecraft[@"modLoaders"];
+            NSDictionary *primaryModLoader = nil;
             if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
-                NSDictionary *primaryModLoader = nil;
-                // Find the primary loader, if any
                 for (NSDictionary *loader in modLoaders) {
                     if ([loader[@"primary"] boolValue]) {
                         primaryModLoader = loader;
@@ -306,48 +309,43 @@
                 if (!primaryModLoader) {
                     primaryModLoader = modLoaders[0];
                 }
-                
-                modLoaderId = primaryModLoader[@"id"] ?: @""; 
-                // e.g. "forge-50.33" or "fabric-0.16.10"
+                modLoaderId = primaryModLoader[@"id"] ?: @"";
                 NSRange dashRange = [modLoaderId rangeOfString:@"-"];
                 if (dashRange.location != NSNotFound) {
-                    // "forge" or "fabric"
-                    NSString *loaderName = [modLoaderId substringToIndex:dashRange.location]; 
-                    NSString *loaderVersion = [modLoaderId substringFromIndex:(dashRange.location + 1)];
-                    
-                    // Format strings based on loaderName
+                    NSString *loaderName = [modLoaderId substringToIndex:dashRange.location];
+                    NSString *loaderVer = [modLoaderId substringFromIndex:(dashRange.location + 1)];
                     if ([loaderName isEqualToString:@"forge"]) {
-                        // e.g. "1.21-forge-50.33"
-                        finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, loaderVersion];
+                        // Format: "<vanillaVersion>-forge-<loaderVer>"
+                        modLoaderVersion = [NSString stringWithFormat:@"forge-%@", loaderVer];
+                        modLoaderId = @"forge";
                     } else if ([loaderName isEqualToString:@"fabric"]) {
-                        // e.g. "fabric-loader-0.16.10-1.21.4"
-                        finalVersionString = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVersion, vanillaVersion];
+                        // Format: "fabric-loader-<loaderVer>-<vanillaVersion>"
+                        modLoaderVersion = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVer, vanillaVersion];
+                        modLoaderId = @"fabric";
                     } else {
-                        // fallback for other mod loaders
-                        // e.g. "1.16.5 | modloader-1.0"
-                        finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
+                        modLoaderVersion = loaderVer;
                     }
                 } else {
-                    // no dash found, fallback
-                    finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
+                    modLoaderVersion = modLoaderId;
                 }
-            } else {
-                // No mod loaders found
-                finalVersionString = vanillaVersion;
             }
+        }
+        NSString *finalVersionString = @"";
+        if ([modLoaderId isEqualToString:@"forge"]) {
+            finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, modLoaderVersion];
+        } else if ([modLoaderId isEqualToString:@"fabric"]) {
+            finalVersionString = modLoaderVersion; // Already formatted.
         } else {
-            // No 'minecraft' object
-            finalVersionString = @"unknown";
+            finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
         }
         
-        // Create or update the profile
         NSString *profileName = manifestDict[@"name"];
         if (profileName) {
             NSDictionary *profileInfo = @{
                 @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", [destPath lastPathComponent]],
                 @"name": profileName,
                 @"lastVersionId": finalVersionString,
-                @"icon": @"" // Optionally set an icon
+                @"icon": @"" // Optionally implement icon extraction.
             };
             PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
             PLProfiles.current.selectedProfileName = profileName;
