@@ -11,11 +11,7 @@
 @property (nonatomic, assign) NSInteger previousOffset;
 @property (nonatomic, assign) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
-
-// Added property for integrated browser fallback.
-// This property will be set by the view controller so that SFSafariViewController
-// can be presented from it when needed.
-@property (nonatomic, weak) UIViewController *parentViewController;
+@property (nonatomic, weak) UIViewController *parentViewController;  // For presenting fallback browser
 
 /// Initialize with a CurseForge API key
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
@@ -30,8 +26,18 @@
 /// Pre-load version details (files) of a mod or modpack item
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item;
 
-/// Install (download) a modpack from the detail dictionary at index in version arrays
+/// Install (download) a modpack from the detail dictionary at index in version arrays.
+/// Instead of immediately starting the download, this stores the pending modpack info
+/// and posts a notification ("ModpackReadyForPlay") so the UI can let the user press "Play".
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
+
+/// Begin the pending download when the user confirms by pressing "Play".
+- (void)startPendingDownload;
+
+/// Submit download tasks from the modpack package to the provided MinecraftResourceDownloadTask.
+- (void)downloader:(MinecraftResourceDownloadTask *)downloader
+submitDownloadTasksFromPackage:(NSString *)packagePath
+            toPath:(NSString *)destPath;
 
 @end
 
