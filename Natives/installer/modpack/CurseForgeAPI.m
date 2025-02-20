@@ -123,10 +123,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         return nil;
     }
     
-    NSDictionary *pagination = response[@"pagination"];
+    JsonObject *paginationInfo = response[@"pagination"];
     NSUInteger totalCount = 0;
-    if ([pagination isKindOfClass:[NSDictionary class]]) {
-        NSNumber *tc = pagination[@"totalCount"];
+    if ([paginationInfo isKindOfClass:[NSDictionary class]]) {
+        NSNumber *tc = paginationInfo[@"totalCount"];
         if ([tc isKindOfClass:[NSNumber class]]) {
             totalCount = tc.unsignedIntegerValue;
         }
@@ -255,7 +255,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 #pragma mark - Install Modpack
 
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
-    // Post notification so that the installer (listener) picks up the download task.
+    // Post a notification so that the installer picks up the download task.
     NSDictionary *userInfo = @{
         @"detail": detail,
         @"index": @(index),
@@ -266,29 +266,48 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
                                                       userInfo:userInfo];
 }
 
+// Updated downloader method to match Java logic:
+// 1. Open the downloaded modpack zip and extract manifest.json.
+// 2. Verify the manifest.
+// 3. For each file in manifest[@"files"], fetch the download URL and create download tasks.
+// 4. Extract the overrides folder.
+// 5. Update the profile with mod loader info.
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
+    
     NSError *error;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
     if (error) {
-        [downloader finishDownloadWithErrorString:
-         [NSString stringWithFormat:@"[CurseForgeAPI] Failed to open .zip: %@", error.localizedDescription]];
+        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Failed to open modpack package: %@", error.localizedDescription]];
         return;
     }
     
+    // Extract and parse manifest.json
     NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
     if (!manifestData || error) {
-        [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in CF modpack"];
+        [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in modpack package"];
         return;
     }
     NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
     if (!manifest || error) {
-        [downloader finishDownloadWithErrorString:
-         [NSString stringWithFormat:@"[CurseForgeAPI] Invalid manifest.json: %@", error.localizedDescription]];
+        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Invalid manifest.json: %@", error.localizedDescription]];
         return;
     }
     
+    // Verify manifest (must be a valid minecraftModpack)
+    if (!([manifest[@"manifestType"] isEqualToString:@"minecraftModpack"] &&
+          [manifest[@"manifestVersion"] integerValue] == 1 &&
+          manifest[@"minecraft"] &&
+          [manifest[@"minecraft"] isKindOfClass:[NSDictionary class]] &&
+          manifest[@"minecraft"][@"modLoaders"] &&
+          [manifest[@"minecraft"][@"modLoaders"] isKindOfClass:[NSArray class]] &&
+          [manifest[@"minecraft"][@"modLoaders"] count] > 0)) {
+        [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] Manifest verification failed"];
+        return;
+    }
+    
+    // Process files array from manifest
     NSArray *filesArr = manifest[@"files"];
     if (![filesArr isKindOfClass:[NSArray class]]) {
         [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No 'files' array in manifest.json"];
@@ -301,7 +320,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSNumber *fileID = cfFile[@"fileID"];
         BOOL required = [cfFile[@"required"] boolValue];
         
-        // Attempt to obtain a download URL using the proper endpoint.
+        // Obtain download URL using our helper (includes gameId parameter)
         NSString *downloadUrl = [self getDownloadURLForProject:projID file:fileID];
         if (!downloadUrl && required) {
             [downloader finishDownloadWithErrorString:
@@ -313,8 +332,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         }
         
         NSString *fileName = downloadUrl.lastPathComponent;
-        NSString *destModPath = [destPath stringByAppendingPathComponent:
-                                 [NSString stringWithFormat:@"mods/%@", fileName]];
+        NSString *destModPath = [destPath stringByAppendingPathComponent:[NSString stringWithFormat:@"mods/%@", fileName]];
         
         NSString *sha1 = [self getSha1ForProject:projID file:fileID];
         
@@ -324,8 +342,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                                                   altName:nil
                                                                    toPath:destModPath];
         if (subTask) {
-            NSString *relPath = [NSString stringWithFormat:@"mods/%@", fileName];
-            [downloader.fileList addObject:relPath];
+            [downloader.fileList addObject:[NSString stringWithFormat:@"mods/%@", fileName]];
             [subTask resume];
         } else if (!downloader.progress.cancelled) {
             downloader.progress.completedUnitCount++;
@@ -334,10 +351,10 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         }
     }
     
-    // Extract overrides from the archive.
-    NSString *overridesDir = manifest[@"overrides"];
-    if (![overridesDir isKindOfClass:[NSString class]] || overridesDir.length == 0) {
-        overridesDir = @"overrides";
+    // Extract overrides from modpack; default folder is "overrides", but can be overridden by manifest
+    NSString *overridesDir = @"overrides";
+    if ([manifest[@"overrides"] isKindOfClass:[NSString class]] && [manifest[@"overrides"] length] > 0) {
+        overridesDir = manifest[@"overrides"];
     }
     [ModpackUtils archive:archive extractDirectory:overridesDir toPath:destPath error:&error];
     if (error) {
@@ -346,23 +363,33 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
     
-    // Clean up the downloaded modpack package.
+    // Delete the modpack zip as cleanup
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
     
-    // Create or update the profile in PLProfiles.
+    // Update profile with modpack information
     NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
     NSString *iconBase64 = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
     
+    // Determine mod loader info by selecting the primary mod loader if available
     NSDictionary *minecraftDict = manifest[@"minecraft"];
     NSString *depID = @"";
     if ([minecraftDict isKindOfClass:[NSDictionary class]]) {
         NSArray *modLoaders = minecraftDict[@"modLoaders"];
         if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
-            NSDictionary *loaderObj = modLoaders.firstObject;
-            if ([loaderObj[@"id"] isKindOfClass:[NSString class]]) {
-                depID = loaderObj[@"id"];
+            NSDictionary *primaryModLoader = nil;
+            for (NSDictionary *loader in modLoaders) {
+                if ([loader[@"primary"] boolValue]) {
+                    primaryModLoader = loader;
+                    break;
+                }
+            }
+            if (!primaryModLoader) {
+                primaryModLoader = modLoaders.firstObject;
+            }
+            if ([primaryModLoader[@"id"] isKindOfClass:[NSString class]]) {
+                depID = primaryModLoader[@"id"];
             }
         }
     }
@@ -374,8 +401,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         @"lastVersionId": depID ?: @"",
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@", iconBase64]
     } mutableCopy];
-    
     profiles.selectedProfileName = packName;
+    
     NSLog(@"[CurseForgeAPI] CF modpack installed: %@", packName);
 }
 
@@ -393,7 +420,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return dataVal;
     }
     
-    // Fallback: fetch file details and construct the download URL manually.
+    // Fallback: fetch file details and construct URL manually.
     endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
     NSDictionary *fallback = [self getEndpoint:endpoint params:params];
     NSDictionary *fallbackData = fallback[@"data"];
@@ -404,7 +431,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             int numericId = [fID intValue];
             int prefix = numericId / 1000;
             int suffix = numericId % 1000;
-            // Use %03d to zero-pad the suffix to three digits.
+            // Use %03d to zero-pad the suffix.
             return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%03d/%@", prefix, suffix, fileName];
         }
     }
