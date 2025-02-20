@@ -131,7 +131,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         return nil;
     }
 
-    // We also want to read "totalCount" from "pagination" => "totalCount"
+    // Read "totalCount" from "pagination" => "totalCount"
     NSDictionary *pagination = response[@"pagination"];
     NSUInteger totalCount = 0;
     if ([pagination isKindOfClass:[NSDictionary class]]) {
@@ -141,10 +141,8 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         }
     }
 
-    // If we have previous results, build onto them. Otherwise, new array
+    // Build results
     NSMutableArray *results = previousResults ?: [NSMutableArray array];
-
-    // For each item in "data", create a dictionary
     for (NSDictionary *modDict in dataArray) {
         if (![modDict isKindOfClass:[NSDictionary class]]) continue;
 
@@ -182,12 +180,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
 
     self.previousOffset += dataArray.count;
-    // If we have fewer items than 'limit' or we've reached the totalCount, we’re done
     if (dataArray.count < limit || results.count >= totalCount) {
         self.reachedLastPage = YES;
     }
 
-    // Store the search term
     self.lastSearchTerm = searchName;
     return results;
 }
@@ -195,12 +191,10 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 #pragma mark - loadDetailsOfMod
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    // The Android code fetches all the non-serverpack files from /mods/:id/files (paginated).
-    // We'll do the same to build "versionNames", "mcVersionNames", "versionUrls", "hashes", etc.
+    // Fetch all non-serverpack files from /mods/:id/files (paginated) to build version arrays.
     NSString *modId = item[@"id"];
     if (modId.length == 0) return;
 
-    // We'll gather an array of all files
     NSMutableArray<NSDictionary *> *allFiles = [NSMutableArray array];
     NSInteger pageOffset = 0;
     BOOL endReached = NO;
@@ -219,30 +213,25 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         if (![data isKindOfClass:[NSArray class]]) {
             return;
         }
-        // For each file, skip if isServerPack = true
         int addedCount = 0;
         for (NSDictionary *fileInfo in data) {
             if (![fileInfo isKindOfClass:[NSDictionary class]]) continue;
             if ([fileInfo[@"isServerPack"] boolValue]) {
-                // skip server packs
                 continue;
             }
             [allFiles addObject:fileInfo];
             addedCount++;
         }
         if (data.count < 50) {
-            // reached last page
             endReached = YES;
         } else {
             pageOffset += data.count;
         }
-        // Prevent potential infinite loop if no files added
         if (addedCount == 0 && data.count == 50) {
             break;
         }
     }
 
-    // Build the standard arrays
     NSMutableArray<NSString *> *versionNames = [NSMutableArray arrayWithCapacity:allFiles.count];
     NSMutableArray<NSString *> *mcVersions   = [NSMutableArray arrayWithCapacity:allFiles.count];
     NSMutableArray<NSString *> *versionUrls  = [NSMutableArray arrayWithCapacity:allFiles.count];
@@ -258,14 +247,12 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         NSString *firstMC = (gv.count > 0 ? gv.firstObject : @"");
         [mcVersions addObject:firstMC];
 
-        // direct "downloadUrl"
         NSString *dlUrl = fileDict[@"downloadUrl"];
         if (![dlUrl isKindOfClass:[NSString class]]) {
             dlUrl = @"";
         }
         [versionUrls addObject:dlUrl];
 
-        // Parse SHA1 from "hashes" if available
         NSString *sha1 = [self getSha1FromFileDict:fileDict];
         [hashes addObject:(sha1 ?: @"")];
     }
@@ -277,7 +264,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     item[@"versionDetailsLoaded"] = @(YES);
 }
 
-// Helper to parse the "hashes" array from a file dictionary
 - (NSString *)getSha1FromFileDict:(NSDictionary *)fileDict {
     NSArray *hashArray = fileDict[@"hashes"];
     if (![hashArray isKindOfClass:[NSArray class]]) {
@@ -285,7 +271,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
     for (NSDictionary *hashObj in hashArray) {
         if (![hashObj isKindOfClass:[NSDictionary class]]) continue;
-        // "algo" = 1 => sha1, "value" => ...
         if ([hashObj[@"algo"] intValue] == 1) {
             return hashObj[@"value"];
         }
@@ -296,11 +281,11 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 #pragma mark - Install
 
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index {
-    // Post a notification that something else might pick up to do the actual install
+    // Post notification so that the installer picks up the download task.
     NSDictionary *userInfo = @{
         @"detail": detail,
         @"index": @(index),
-        @"source": @(0)  // 0 => CF
+        @"source": @(0)  // 0 => CurseForge
     };
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"InstallModpack"
@@ -320,7 +305,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
 
-    // Extract "manifest.json"
     NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
     if (!manifestData || error) {
         [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in CF modpack"];
@@ -333,7 +317,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
 
-    // "files" => array of { projectID, fileID, required }
     NSArray *filesArr = manifest[@"files"];
     if (![filesArr isKindOfClass:[NSArray class]]) {
         [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No 'files' array in manifest.json"];
@@ -346,7 +329,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSNumber *fileID = cfFile[@"fileID"];
         BOOL required = [cfFile[@"required"] boolValue];
 
-        // Build an API call to get a direct download link; include gameId parameter.
+        // Get the download URL including gameId parameter.
         NSString *downloadUrl = [self getDownloadURLForProject:projID file:fileID];
         if (!downloadUrl && required) {
             [downloader finishDownloadWithErrorString:
@@ -357,33 +340,28 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             continue;
         }
 
-        // Guess final filename from the URL
         NSString *fileName = downloadUrl.lastPathComponent;
         NSString *destModPath = [destPath stringByAppendingPathComponent:
                                  [NSString stringWithFormat:@"mods/%@", fileName]];
 
-        // Optionally fetch the SHA-1 for verification
         NSString *sha1 = [self getSha1ForProject:projID file:fileID];
 
-        // Create & queue the sub-download
         NSURLSessionDownloadTask *subTask = [downloader createDownloadTask:downloadUrl
                                                                      size:0
                                                                       sha:sha1
                                                                   altName:nil
                                                                    toPath:destModPath];
         if (subTask) {
-            // Record the relative path in fileList
             NSString *relPath = [NSString stringWithFormat:@"mods/%@", fileName];
             [downloader.fileList addObject:relPath];
             [subTask resume];
         } else if (!downloader.progress.cancelled) {
             downloader.progress.completedUnitCount++;
         } else {
-            return; // cancelled
+            return;
         }
     }
 
-    // Extract overrides
     NSString *overridesDir = manifest[@"overrides"];
     if (![overridesDir isKindOfClass:[NSString class]] || overridesDir.length == 0) {
         overridesDir = @"overrides";
@@ -394,16 +372,13 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
           [NSString stringWithFormat:@"[CurseForgeAPI] Could not extract overrides: %@", error.localizedDescription]];
         return;
     }
-    // Clean up the .zip package
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
 
-    // Create or update the profile in PLProfiles
     NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
     NSString *iconBase64 = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
 
-    // Parse out dependency information from the manifest (e.g. mod loader id)
     NSDictionary *minecraftDict = manifest[@"minecraft"];
     NSString *depID = @"";
     if ([minecraftDict isKindOfClass:[NSDictionary class]]) {
@@ -432,7 +407,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 
 - (NSString *)getDownloadURLForProject:(NSNumber *)projID file:(NSNumber *)fileID {
     if (!projID || !fileID) return nil;
-    // Include gameId parameter per API requirement
+    // Include gameId parameter as required by the API.
     NSDictionary *params = @{@"gameId": @(kCurseForgeGameIDMinecraft)};
     NSString *endpoint = [NSString stringWithFormat:@"mods/%@/files/%@/download-url", projID, fileID];
     NSDictionary *resp = [self getEndpoint:endpoint params:params];
@@ -441,11 +416,10 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     }
     id dataVal = resp[@"data"];
     if ([dataVal isKindOfClass:[NSString class]]) {
-        // Success: direct download URL returned
         return dataVal;
     }
     
-    // Fallback: fetch file details and build an edge.forgecdn.net URL
+    // Fallback: fetch file details and construct the download URL.
     endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
     NSDictionary *fallback = [self getEndpoint:endpoint params:params];
     NSDictionary *fallbackData = fallback[@"data"];
@@ -456,7 +430,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             int numericId = [fID intValue];
             int prefix = numericId / 1000;
             int suffix = numericId % 1000;
-            return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%d/%@", prefix, suffix, fileName];
+            // Pad the suffix with three digits as required.
+            return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%d/%03d/%@", prefix, suffix, fileName];
         }
     }
     return nil;
