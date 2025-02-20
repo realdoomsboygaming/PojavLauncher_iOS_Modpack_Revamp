@@ -92,9 +92,8 @@
             // Re-run the search in case user typed something
             [self updateSearchResults];
         } else {
-            // If user provided no key, you might want to default to Modrinth
-            // or just allow “empty” CF usage. Example:
-            self.apiSegmentControl.selectedSegmentIndex = 1; // Switch to Modrinth
+            // If user provided no key, default to Modrinth
+            self.apiSegmentControl.selectedSegmentIndex = 1;
             [self updateSearchResults];
         }
     }];
@@ -121,7 +120,7 @@
         NSString *key = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
         if (!key || key.length == 0) {
             [self promptForCurseForgeAPIKey];
-            return; // or let the prompt handle the rest
+            return; // let the prompt handle the rest
         }
     }
     
@@ -165,8 +164,6 @@
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
             // Using CurseForge
             if (!self.curseForge) {
-                // If we got here but still have no CF instance, bail out
-                // (or show an error). For safety:
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [self switchToReadyState];
                     showDialog(@"Missing CF Key", @"No CurseForge API key provided. Switching to Modrinth.");
@@ -242,9 +239,30 @@
 
 #pragma mark - TableView Delegate
 
+// Modified didSelectRowAtIndexPath to ensure version details are loaded before showing version selection
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    [self showDetails:self.list[indexPath.row] atIndexPath:indexPath];
+    
+    // Get the selected modpack details as a mutable dictionary
+    NSMutableDictionary *item = [self.list objectAtIndex:indexPath.row];
+    
+    // If version details aren't loaded, load them first
+    if (![item[@"versionDetailsLoaded"] boolValue]) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            if (self.apiSegmentControl.selectedSegmentIndex == 0) {
+                [self.curseForge loadDetailsOfMod:item];
+            } else {
+                [self.modrinth loadDetailsOfMod:item];
+            }
+            // Mark details as loaded
+            item[@"versionDetailsLoaded"] = @(YES);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showDetails:item atIndexPath:indexPath];
+            });
+        });
+    } else {
+        [self showDetails:item atIndexPath:indexPath];
+    }
 }
 
 #pragma mark - Context Menu (iOS 13+)
