@@ -10,6 +10,8 @@
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
 #define CURSEFORGE_PAGINATION_SIZE 50
+#define CURSEFORGE_PAGINATION_END_REACHED -1
+#define CURSEFORGE_PAGINATION_ERROR -2
 
 @interface CurseForgeAPI ()
 @property (nonatomic, copy) NSString *apiKey;
@@ -36,7 +38,6 @@
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     
-    // Use our API key or fallback to environment variable
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -65,13 +66,13 @@
          previousPageResult:(NSMutableArray *)prevResult
                  completion:(void (^ _Nonnull)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        int limit = 50;
+        int limit = CURSEFORGE_PAGINATION_SIZE;
         NSString *query = searchFilters[@"name"] ?: @"";
         NSMutableDictionary *params = [@{
             @"gameId": @(kCurseForgeGameIDMinecraft),
             @"classId": ([searchFilters[@"isModpack"] boolValue] ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod)),
             @"searchFilter": query,
-            @"sortField": @(1),       // Using relevancy sort, as in Android
+            @"sortField": @(1), // relevancy
             @"sortOrder": @"desc",
             @"pageSize": @(limit),
             @"index": @(prevResult.count)
@@ -94,11 +95,15 @@
         NSMutableArray *result = prevResult ?: [NSMutableArray new];
         NSArray *data = response[@"data"];
         for (NSDictionary *mod in data) {
+            // Skip mods where allowModDistribution is false (if present)
+            id allow = mod[@"allowModDistribution"];
+            if (allow != nil && ![allow isKindOfClass:[NSNull class]] && ![allow boolValue]) {
+                continue;
+            }
             BOOL isModpack = ([mod[@"classId"] integerValue] == kCurseForgeClassIDModpack);
             NSMutableDictionary *entry = [@{
-                @"apiSource": @(0),
+                @"apiSource": @(1), // Using 1 for CurseForge
                 @"isModpack": @(isModpack),
-                // Force id to be a string
                 @"id": [NSString stringWithFormat:@"%@", mod[@"id"]],
                 @"title": (mod[@"name"] ? [NSString stringWithFormat:@"%@", mod[@"name"]] : @""),
                 @"description": (mod[@"summary"] ? [NSString stringWithFormat:@"%@", mod[@"summary"]] : @""),
@@ -111,23 +116,20 @@
         NSUInteger totalCount = [pagination[@"totalCount"] unsignedIntegerValue];
         self.reachedLastPage = (result.count >= totalCount);
         
-        if (completion) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(result, nil);
-            });
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(result, nil);
+        });
     });
 }
 
-// Pagination-based details loading, similar to the Android port.
+// Paginated details loading similar to the Android version
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item
               completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSMutableArray *allDetails = [NSMutableArray new];
         NSInteger index = 0;
-        NSInteger pageSize = CURSEFORGE_PAGINATION_SIZE;
         while (YES) {
-            NSDictionary *params = @{@"index": @(index), @"pageSize": @(pageSize)};
+            NSMutableDictionary *params = [NSMutableDictionary dictionaryWithDictionary:@{@"index": @(index), @"pageSize": @(CURSEFORGE_PAGINATION_SIZE)}];
             NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", item[@"id"]] params:params];
             if (!response) {
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -136,12 +138,16 @@
                 return;
             }
             NSArray *data = response[@"data"];
-            if (!data) break;
+            if (!data || data.count == 0) {
+                break;
+            }
             for (NSDictionary *file in data) {
                 if ([file[@"isServerPack"] boolValue]) continue;
                 [allDetails addObject:file];
             }
-            if (data.count < pageSize) break;
+            if (data.count < CURSEFORGE_PAGINATION_SIZE) {
+                break;
+            }
             index += data.count;
         }
         
@@ -162,7 +168,6 @@
             [mcNames addObject:gameVersion];
             [urls addObject:[NSString stringWithFormat:@"%@", file[@"downloadUrl"] ?: @""]];
             [sizes addObject:[NSString stringWithFormat:@"%@", file[@"fileLength"] ?: @"0"]];
-            
             NSString *sha1 = @"";
             NSArray *hashesArray = file[@"hashes"];
             for (NSDictionary *hashDict in hashesArray) {
@@ -189,7 +194,7 @@
 - (void)installModpackFromDetail:(NSDictionary *)modDetail
                          atIndex:(NSUInteger)selectedVersion
                       completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
-    // For now, we use the superclass implementation.
+    // For now, use the superclass implementation.
     [super installModpackFromDetail:modDetail atIndex:selectedVersion];
     if (completion) {
         completion(nil);
