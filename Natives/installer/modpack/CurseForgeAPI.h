@@ -4,8 +4,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>  // Needed for UIViewController
 
-@class MinecraftResourceDownloadTask;  // Forward declaration
-
 @interface CurseForgeAPI : NSObject
 
 @property (nonatomic, strong, readonly) NSString *apiKey;
@@ -13,6 +11,10 @@
 @property (nonatomic, assign) NSInteger previousOffset;
 @property (nonatomic, assign) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
+
+// Added property for integrated browser fallback.
+// This property will be set by the view controller so that SFSafariViewController
+// can be presented from it when needed.
 @property (nonatomic, weak) UIViewController *parentViewController;
 
 /// Initialize with a CurseForge API key
@@ -30,11 +32,6 @@
 
 /// Install (download) a modpack from the detail dictionary at index in version arrays
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
-
-/// Submit download tasks from the downloaded modpack package
-- (void)downloader:(MinecraftResourceDownloadTask *)downloader
-submitDownloadTasksFromPackage:(NSString *)packagePath
-            toPath:(NSString *)destPath;
 
 @end
 
