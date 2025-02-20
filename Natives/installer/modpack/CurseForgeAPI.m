@@ -126,38 +126,28 @@
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item
               completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSMutableArray *allDetails = [NSMutableArray new];
-        NSInteger index = 0;
-        while (YES) {
-            NSMutableDictionary *params = [NSMutableDictionary dictionaryWithDictionary:@{@"index": @(index), @"pageSize": @(CURSEFORGE_PAGINATION_SIZE)}];
-            NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", item[@"id"]] params:params];
-            if (!response) {
+        NSString *modId = [NSString stringWithFormat:@"%@", item[@"id"]];
+        NSDictionary *response = [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", modId] params:nil];
+        if (!response) {
+            if (completion) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     completion(self.lastError);
                 });
-                return;
             }
-            NSArray *data = response[@"data"];
-            if (!data || data.count == 0) {
-                break;
-            }
-            for (NSDictionary *file in data) {
-                if ([file[@"isServerPack"] boolValue]) continue;
-                [allDetails addObject:file];
-            }
-            if (data.count < CURSEFORGE_PAGINATION_SIZE) {
-                break;
-            }
-            index += data.count;
+            return;
         }
-        
+        NSArray *files = response[@"data"];
         NSMutableArray *names = [NSMutableArray new];
         NSMutableArray *mcNames = [NSMutableArray new];
         NSMutableArray *urls = [NSMutableArray new];
         NSMutableArray *hashes = [NSMutableArray new];
         NSMutableArray *sizes = [NSMutableArray new];
-        for (NSDictionary *file in allDetails) {
+        
+        [files enumerateObjectsUsingBlock:^(NSDictionary *file, NSUInteger i, BOOL *stop) {
+            // File name
             [names addObject:[NSString stringWithFormat:@"%@", file[@"fileName"] ?: @""]];
+            
+            // Minecraft version(s)
             id versions = file[@"gameVersion"] ?: file[@"gameVersionList"];
             NSString *gameVersion = @"";
             if ([versions isKindOfClass:[NSArray class]] && [versions count] > 0) {
@@ -166,8 +156,23 @@
                 gameVersion = [NSString stringWithFormat:@"%@", versions];
             }
             [mcNames addObject:gameVersion];
+            
+            // Download URL
             [urls addObject:[NSString stringWithFormat:@"%@", file[@"downloadUrl"] ?: @""]];
-            [sizes addObject:[NSString stringWithFormat:@"%@", file[@"fileLength"] ?: @"0"]];
+            
+            // File length as NSNumber
+            NSNumber *sizeNumber = nil;
+            id fileLength = file[@"fileLength"];
+            if ([fileLength isKindOfClass:[NSNumber class]]) {
+                sizeNumber = fileLength;
+            } else if ([fileLength isKindOfClass:[NSString class]]) {
+                sizeNumber = @([fileLength unsignedLongLongValue]);
+            } else {
+                sizeNumber = @(0);
+            }
+            [sizes addObject:sizeNumber];
+            
+            // SHA1 hash
             NSString *sha1 = @"";
             NSArray *hashesArray = file[@"hashes"];
             for (NSDictionary *hashDict in hashesArray) {
@@ -177,7 +182,8 @@
                 }
             }
             [hashes addObject:sha1];
-        }
+        }];
+        
         item[@"versionNames"] = names;
         item[@"mcVersionNames"] = mcNames;
         item[@"versionUrls"] = urls;
@@ -190,6 +196,7 @@
         });
     });
 }
+
 
 - (void)installModpackFromDetail:(NSDictionary *)modDetail
                          atIndex:(NSUInteger)selectedVersion
