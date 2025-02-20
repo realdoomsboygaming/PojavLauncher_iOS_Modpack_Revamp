@@ -284,7 +284,7 @@
         NSDictionary *profileInfo = @{
             @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", [destPath lastPathComponent]],
             @"name": profileName,
-            @"lastVersionId": manifestDict[@"minecraftVersion"] ?: @"",
+            @"lastVersionId": ((manifestDict[@"minecraft"] && [manifestDict[@"minecraft"] isKindOfClass:[NSDictionary class]]) ? manifestDict[@"minecraft"][@"version"] : @""),
             @"icon": @"" // Implement icon extraction if needed.
         };
         PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
