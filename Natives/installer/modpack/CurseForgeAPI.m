@@ -19,15 +19,24 @@
 
 #pragma mark - Overridden GET Endpoint
 
-// Override to add the required API key header
+// Override to add the required API key header using the secret provided via environment variable
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
     __block id result;
     dispatch_group_t group = dispatch_group_create();
     dispatch_group_enter(group);
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    // Set the API key header from your configuration (defined in config.h)
-    [manager.requestSerializer setValue:CONFIG_CURSEFORGE_API_KEY forHTTPHeaderField:@"x-api-key"];
+    
+    // Use the API key from config.h if defined, otherwise fallback to the environment variable
+    NSString *apiKey = CONFIG_CURSEFORGE_API_KEY;
+    if (apiKey.length == 0) {
+        char *envKey = getenv("CURSEFORGE_API_KEY");
+        if (envKey) {
+            apiKey = [NSString stringWithUTF8String:envKey];
+        }
+    }
+    [manager.requestSerializer setValue:apiKey forHTTPHeaderField:@"x-api-key"];
+    
     [manager GET:url parameters:params headers:nil progress:nil
          success:^(NSURLSessionTask *task, id obj) {
              result = obj;
