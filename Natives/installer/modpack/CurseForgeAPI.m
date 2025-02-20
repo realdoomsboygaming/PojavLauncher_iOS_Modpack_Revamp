@@ -10,6 +10,10 @@
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
 
+@interface CurseForgeAPI ()
+@property (nonatomic, copy) NSString *apiKey;
+@end
+
 @implementation CurseForgeAPI
 
 #pragma mark - Initialization
@@ -17,7 +21,7 @@
 - (instancetype)initWithAPIKey:(NSString *)apiKey {
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
     if (self) {
-        _apiKey = apiKey;
+        self.apiKey = apiKey;
     }
     return self;
 }
