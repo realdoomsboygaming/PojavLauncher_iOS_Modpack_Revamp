@@ -4,6 +4,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>  // Needed for UIViewController
 
+@class MinecraftResourceDownloadTask;  // Forward declaration
+
 @interface CurseForgeAPI : NSObject
 
 @property (nonatomic, strong, readonly) NSString *apiKey;
@@ -11,7 +13,7 @@
 @property (nonatomic, assign) NSInteger previousOffset;
 @property (nonatomic, assign) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
-@property (nonatomic, weak) UIViewController *parentViewController;  // For presenting fallback browser
+@property (nonatomic, weak) UIViewController *parentViewController;
 
 /// Initialize with a CurseForge API key
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
@@ -26,15 +28,10 @@
 /// Pre-load version details (files) of a mod or modpack item
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item;
 
-/// Install (download) a modpack from the detail dictionary at index in version arrays.
-/// Instead of immediately starting the download, this stores the pending modpack info
-/// and posts a notification ("ModpackReadyForPlay") so the UI can let the user press "Play".
+/// Install (download) a modpack from the detail dictionary at index in version arrays
 - (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
 
-/// Begin the pending download when the user confirms by pressing "Play".
-- (void)startPendingDownload;
-
-/// Submit download tasks from the modpack package to the provided MinecraftResourceDownloadTask.
+/// Submit download tasks from the downloaded modpack package
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath;
