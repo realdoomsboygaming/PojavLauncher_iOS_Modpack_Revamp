@@ -1,46 +1,52 @@
-#ifndef CurseForgeAPI_h
-#define CurseForgeAPI_h
-
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>  // Needed for UIViewController
+#import <UIKit/UIKit.h>
 
-@class MinecraftResourceDownloadTask;  // Forward declaration
+@class MinecraftResourceDownloadTask;
+
+NS_ASSUME_NONNULL_BEGIN
 
 @interface CurseForgeAPI : NSObject
 
 @property (nonatomic, strong, readonly) NSString *apiKey;
-@property (nonatomic, strong) NSError *lastError;
+@property (nonatomic, strong, nullable) NSError *lastError;
 @property (nonatomic, assign) NSInteger previousOffset;
 @property (nonatomic, assign) BOOL reachedLastPage;
-@property (nonatomic, strong) NSString *lastSearchTerm;
+@property (nonatomic, strong, nullable) NSString *lastSearchTerm;
 
 // This property will be set by the view controller so that SFSafariViewController can be presented.
-@property (nonatomic, weak) UIViewController *parentViewController;
+@property (nonatomic, weak, nullable) UIViewController *parentViewController;
 
 /// Initialize with a CurseForge API key
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
 
-/// Make a GET request to some endpoint, returning a parsed JSON object
-- (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params;
+/// Asynchronous GET request to an endpoint, returning parsed JSON in the completion block.
+- (void)getEndpoint:(NSString *)endpoint
+             params:(NSDictionary *)params
+         completion:(void(^)(id _Nullable result, NSError * _Nullable error))completion;
 
-/// Search for a mod or modpack with the given filters
-- (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters
-                      previousPageResult:(NSMutableArray *)previousResults;
+/// Asynchronously search for a mod or modpack with the given filters.
+- (void)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters
+         previousPageResult:(NSMutableArray * _Nullable)previousResults
+                 completion:(void(^)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion;
 
-/// Pre-load version details (files) of a mod or modpack item
-- (void)loadDetailsOfMod:(NSMutableDictionary *)item;
+/// Asynchronously load details (version info) for a mod or modpack item.
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item
+              completion:(void(^)(NSError * _Nullable error))completion;
 
-/// Install (download) a modpack from the detail dictionary at index in version arrays
-- (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
+/// Asynchronously install (download) a modpack from the detail dictionary at a given index.
+- (void)installModpackFromDetail:(NSDictionary *)detail
+                         atIndex:(NSInteger)index
+                      completion:(void(^)(NSError * _Nullable error))completion;
 
-/// Submit download tasks from the downloaded modpack package
+/// Submit download tasks from the downloaded modpack package.
+/// (This method remains synchronous/unchanged.)
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
-            toPath:(NSString *)destPath;
+               toPath:(NSString *)destPath;
 
-/// Start the pending subfile downloads (to be triggered when the user taps "Play")
+/// Start pending subfile downloads (triggered when the user taps "Play").
 - (void)startPendingDownload;
 
 @end
 
-#endif /* CurseForgeAPI_h */
+NS_ASSUME_NONNULL_END
