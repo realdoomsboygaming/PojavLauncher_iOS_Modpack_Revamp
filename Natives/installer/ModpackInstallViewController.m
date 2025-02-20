@@ -18,6 +18,9 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
+    // Ensure that the search controller is presented within this view controller’s bounds.
+    self.definesPresentationContext = YES;
+    
     // Setup table view (since we’re a UITableViewController)
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
@@ -143,7 +146,6 @@
 #pragma mark - Notification Handler
 
 - (void)modpackReadyForPlay:(NSNotification *)notification {
-    // When a modpack is ready for play, display a "Play" button.
     dispatch_async(dispatch_get_main_queue(), ^{
         UIBarButtonItem *playButton = [[UIBarButtonItem alloc] initWithTitle:@"Play"
                                                                        style:UIBarButtonItemStyleDone
@@ -154,9 +156,7 @@
 }
 
 - (void)playModpackPressed:(id)sender {
-    // When the user taps "Play," start the pending download.
     [self.curseForge startPendingDownload];
-    // Optionally, remove the play button after starting.
     self.navigationItem.rightBarButtonItem = nil;
 }
 
