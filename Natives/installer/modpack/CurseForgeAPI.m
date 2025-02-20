@@ -194,7 +194,9 @@
     NSArray *versionNames = modDetail[@"versionNames"];
     if (selectedVersion >= versionNames.count) {
         if (completion) {
-            NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:100 userInfo:@{NSLocalizedDescriptionKey:@"Selected version index is out of bounds."}];
+            NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
+                                                 code:100
+                                             userInfo:@{NSLocalizedDescriptionKey: @"Selected version index is out of bounds."}];
             completion(error);
         }
         return;
@@ -279,12 +281,36 @@
     
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
     
+    // Extract vanilla and mod loader versions from the manifest.
+    NSDictionary *minecraft = manifestDict[@"minecraft"];
+    NSString *vanillaVersion = @"";
+    NSString *modLoaderVersion = @"";
+    if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
+        vanillaVersion = minecraft[@"version"] ?: @"";
+        NSArray *modLoaders = minecraft[@"modLoaders"];
+        NSDictionary *primaryModLoader = nil;
+        if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
+            for (NSDictionary *loader in modLoaders) {
+                if ([loader[@"primary"] boolValue]) {
+                    primaryModLoader = loader;
+                    break;
+                }
+            }
+            if (!primaryModLoader) {
+                primaryModLoader = modLoaders[0];
+            }
+            modLoaderVersion = primaryModLoader[@"id"] ?: @"";
+        }
+    }
+    // Combine vanilla and mod loader versions.
+    NSString *combinedVersion = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderVersion];
+    
     NSString *profileName = manifestDict[@"name"];
     if (profileName) {
         NSDictionary *profileInfo = @{
             @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", [destPath lastPathComponent]],
             @"name": profileName,
-            @"lastVersionId": ((manifestDict[@"minecraft"] && [manifestDict[@"minecraft"] isKindOfClass:[NSDictionary class]]) ? manifestDict[@"minecraft"][@"version"] : @""),
+            @"lastVersionId": combinedVersion,
             @"icon": @"" // Implement icon extraction if needed.
         };
         PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
