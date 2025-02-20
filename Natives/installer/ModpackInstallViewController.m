@@ -1,15 +1,13 @@
-#import "AFNetworking.h"
-#import "LauncherNavigationController.h"
 #import "ModpackInstallViewController.h"
-#import "UIKit+AFNetworking.h"
-#import "UIKit+hook.h"
+#import "LauncherNavigationController.h"
 #import "WFWorkflowProgressView.h"
-#import "modpack/ModrinthAPI.h"
-#import "modpack/CurseForgeAPI.h"
-#import "config.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#include <dlfcn.h>
+#import "config.h"
+
+// These imports may be redundant, but are included for completeness.
+#import "modpack/CurseForgeAPI.h"
+#import "modpack/ModrinthAPI.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -386,4 +384,3 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 @end
 
 NS_ASSUME_NONNULL_END
-
