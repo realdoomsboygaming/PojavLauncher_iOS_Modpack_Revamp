@@ -11,24 +11,21 @@
 @property (nonatomic, assign) BOOL reachedLastPage;
 @property (nonatomic, strong) NSString *lastSearchTerm;
 
-/// Initialize with a CurseForge API key (loaded from user defaults or environment).
+/// Initialize with a CurseForge API key
 - (instancetype)initWithAPIKey:(NSString *)apiKey;
 
-/// Load from environment variable if not specified.
-- (NSString *)loadAPIKey;
-
-/// Generic method to call the CurseForge endpoint.
+/// Make a GET request to some endpoint, returning a parsed JSON object
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params;
 
-/// Search for a mod or modpack with filters
+/// Search for a mod or modpack with the given filters
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters
                       previousPageResult:(NSMutableArray *)previousResults;
 
-/// Install modpack from detail. 
-- (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
-
-/// Pre-load version details. 
+/// Pre-load version details (files) of a mod or modpack item
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item;
+
+/// Install (download) a modpack from the detail dictionary at index in version arrays
+- (void)installModpackFromDetail:(NSDictionary *)detail atIndex:(NSInteger)index;
 
 @end
 
