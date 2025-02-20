@@ -96,7 +96,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     return resultObj;
 }
 
-#pragma mark - Search
+#pragma mark - Search & Details
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, id> *)searchFilters
                       previousPageResult:(NSMutableArray *)previousResults {
@@ -186,8 +186,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     return results;
 }
 
-#pragma mark - Load Mod Details
-
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
     NSString *modId = item[@"id"];
     if (modId.length == 0) return;
@@ -272,7 +270,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     }
     self.fallbackZipUrl = zipUrlString;
     
-    // Immediately download the modpack zip and process the manifest.
+    // Immediately download the modpack zip file.
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
     NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:zipURL completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
@@ -404,7 +402,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
             self.pendingModpackDetail = detail;
             self.pendingModpackIndex = index;
             
-            // Notify the UI that the modpack is ready to play.
+            // Notify the UI that the modpack is ready for play.
             [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackReadyForPlay" object:self];
         });
     });
