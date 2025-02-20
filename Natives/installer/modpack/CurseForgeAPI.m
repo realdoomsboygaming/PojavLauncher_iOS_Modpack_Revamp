@@ -191,13 +191,22 @@
 - (void)installModpackFromDetail:(NSDictionary *)modDetail
                          atIndex:(NSUInteger)selectedVersion
                       completion:(void (^ _Nonnull)(NSError * _Nullable error))completion {
+    NSArray *versionNames = modDetail[@"versionNames"];
+    if (selectedVersion >= versionNames.count) {
+        if (completion) {
+            NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:100 userInfo:@{NSLocalizedDescriptionKey:@"Selected version index is out of bounds."}];
+            completion(error);
+        }
+        return;
+    }
+    // Proceed with installation by calling the superclass method (or implement your own installation)
     [super installModpackFromDetail:modDetail atIndex:selectedVersion];
     if (completion) {
         completion(nil);
     }
 }
 
-#pragma mark - New: Submit Download Tasks from Package
+#pragma mark - Download Tasks from Package
 
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     NSError *error = nil;
@@ -262,17 +271,14 @@
         }
     }
     
-    // Extract overrides directory if present
     [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", error.localizedDescription]];
         return;
     }
     
-    // Remove the temporary package file
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
     
-    // Optionally update profile information using manifest data
     NSString *profileName = manifestDict[@"name"];
     if (profileName) {
         NSDictionary *profileInfo = @{
