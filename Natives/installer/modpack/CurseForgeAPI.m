@@ -10,8 +10,9 @@ static const NSInteger kCurseForgeClassIDModpack  = 4471;
 static const NSInteger kCurseForgeClassIDMod      = 6;
 
 @interface CurseForgeAPI ()
-// New property to hold the modpack zip URL for fallback.
+// Used for fallback integrated browser when errors occur.
 @property (nonatomic, strong) NSString *fallbackZipUrl;
+// parentViewController is declared in the header.
 @end
 
 @implementation CurseForgeAPI
@@ -25,7 +26,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
         _previousOffset = 0;
         _reachedLastPage = NO;
         _lastSearchTerm = nil;
-        // fallbackZipUrl is initially nil.
         _fallbackZipUrl = nil;
     }
     return self;
@@ -298,149 +298,165 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
-    
-    NSError *error;
-    UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
-    if (error) {
-        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Failed to open modpack package: %@", error.localizedDescription]];
-        [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-        return;
-    }
-    
-    NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
-    if (!manifestData || error) {
-        [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in modpack package"];
-        [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-        return;
-    }
-    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
-    if (!manifest || error) {
-        [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Invalid manifest.json: %@", error.localizedDescription]];
-        [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-        return;
-    }
-    
-    // Verify manifest – must be a valid minecraftModpack.
-    if (!([manifest[@"manifestType"] isEqualToString:@"minecraftModpack"] &&
-          [manifest[@"manifestVersion"] integerValue] == 1 &&
-          manifest[@"minecraft"] &&
-          [manifest[@"minecraft"] isKindOfClass:[NSDictionary class]] &&
-          manifest[@"minecraft"][@"modLoaders"] &&
-          [manifest[@"minecraft"][@"modLoaders"] isKindOfClass:[NSArray class]] &&
-          [manifest[@"minecraft"][@"modLoaders"] count] > 0)) {
-        [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] Manifest verification failed"];
-        [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-        return;
-    }
-    
-    NSArray *filesArr = manifest[@"files"];
-    if (![filesArr isKindOfClass:[NSArray class]]) {
-        [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No 'files' array in manifest.json"];
-        [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-        return;
-    }
-    downloader.progress.totalUnitCount = filesArr.count;
-    
-    // Limit concurrent downloads to 5.
-    dispatch_semaphore_t downloadSemaphore = dispatch_semaphore_create(5);
-    
-    for (NSDictionary *cfFile in filesArr) {
-        NSNumber *projID = cfFile[@"projectID"];
-        NSNumber *fileID = cfFile[@"fileID"];
-        BOOL required = [cfFile[@"required"] boolValue];
-        
-        dispatch_semaphore_wait(downloadSemaphore, DISPATCH_TIME_FOREVER);
-        // Obtain download URL using helper.
-        NSString *downloadUrl = [self getDownloadURLForProject:projID file:fileID];
-        if (!downloadUrl && required) {
-            NSLog(@"[CurseForgeAPI] Error obtaining URL for project %@, file %@. Falling back to browser.", projID, fileID);
-            [downloader finishDownloadWithErrorString:
-             [NSString stringWithFormat:@"[CurseForgeAPI] Could not obtain download URL for project %@, file %@", projID, fileID]];
-            dispatch_semaphore_signal(downloadSemaphore);
-            [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-            return;
-        } else if (!downloadUrl) {
-            downloader.progress.completedUnitCount++;
-            dispatch_semaphore_signal(downloadSemaphore);
-            continue;
-        }
-        
-        NSString *fileName = downloadUrl.lastPathComponent;
-        NSString *destModPath = [destPath stringByAppendingPathComponent:[NSString stringWithFormat:@"mods/%@", fileName]];
-        
-        NSString *sha1 = [self getSha1ForProject:projID file:fileID];
-        NSURLSessionDownloadTask *subTask = [downloader createDownloadTask:downloadUrl
-                                                                     size:0
-                                                                      sha:sha1
-                                                                  altName:nil
-                                                                   toPath:destModPath];
-        if (subTask) {
-            [downloader.fileList addObject:[NSString stringWithFormat:@"mods/%@", fileName]];
-            // Observe task state to signal when it completes.
-            [subTask addObserver:self forKeyPath:@"state" options:NSKeyValueObservingOptionNew context:(__bridge void *)downloadSemaphore];
-            [subTask resume];
-        } else if (!downloader.progress.cancelled) {
-            downloader.progress.completedUnitCount++;
-            dispatch_semaphore_signal(downloadSemaphore);
-        } else {
-            dispatch_semaphore_signal(downloadSemaphore);
+    // Offload heavy file operations to a background queue.
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSError *error;
+        UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
+        if (error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Failed to open modpack package: %@", error.localizedDescription]];
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
             return;
         }
-    }
-    
-    // Extract overrides folder.
-    NSString *overridesDir = @"overrides";
-    if ([manifest[@"overrides"] isKindOfClass:[NSString class]] && [manifest[@"overrides"] length] > 0) {
-        overridesDir = manifest[@"overrides"];
-    }
-    [ModpackUtils archive:archive extractDirectory:overridesDir toPath:destPath error:&error];
-    if (error) {
-        [downloader finishDownloadWithErrorString:
-         [NSString stringWithFormat:@"[CurseForgeAPI] Could not extract overrides: %@", error.localizedDescription]];
-        [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
-        return;
-    }
-    
-    // Cleanup: Delete the modpack zip.
-    [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-    
-    // Update profile with modpack info.
-    NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
-    NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
-    NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
-    NSString *iconBase64 = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
-    
-    NSDictionary *minecraftDict = manifest[@"minecraft"];
-    NSString *depID = @"";
-    if ([minecraftDict isKindOfClass:[NSDictionary class]]) {
-        NSArray *modLoaders = minecraftDict[@"modLoaders"];
-        if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
-            NSDictionary *primaryModLoader = nil;
-            for (NSDictionary *loader in modLoaders) {
-                if ([loader[@"primary"] boolValue]) {
-                    primaryModLoader = loader;
-                    break;
+        
+        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
+        if (!manifestData || error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No manifest.json in modpack package"];
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+        if (!manifest || error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"[CurseForgeAPI] Invalid manifest.json: %@", error.localizedDescription]];
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        
+        // Verify manifest – must be a valid minecraftModpack.
+        if (!([manifest[@"manifestType"] isEqualToString:@"minecraftModpack"] &&
+              [manifest[@"manifestVersion"] integerValue] == 1 &&
+              manifest[@"minecraft"] &&
+              [manifest[@"minecraft"] isKindOfClass:[NSDictionary class]] &&
+              manifest[@"minecraft"][@"modLoaders"] &&
+              [manifest[@"minecraft"][@"modLoaders"] isKindOfClass:[NSArray class]] &&
+              [manifest[@"minecraft"][@"modLoaders"] count] > 0)) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] Manifest verification failed"];
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        
+        NSArray *filesArr = manifest[@"files"];
+        if (![filesArr isKindOfClass:[NSArray class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloader finishDownloadWithErrorString:@"[CurseForgeAPI] No 'files' array in manifest.json"];
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        downloader.progress.totalUnitCount = filesArr.count;
+        
+        // Limit concurrent downloads to 5.
+        dispatch_semaphore_t downloadSemaphore = dispatch_semaphore_create(5);
+        
+        // Process each file.
+        for (NSDictionary *cfFile in filesArr) {
+            NSNumber *projID = cfFile[@"projectID"];
+            NSNumber *fileID = cfFile[@"fileID"];
+            BOOL required = [cfFile[@"required"] boolValue];
+            
+            dispatch_semaphore_wait(downloadSemaphore, DISPATCH_TIME_FOREVER);
+            NSString *downloadUrl = [self getDownloadURLForProject:projID file:fileID];
+            if (!downloadUrl && required) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [downloader finishDownloadWithErrorString:
+                     [NSString stringWithFormat:@"[CurseForgeAPI] Could not obtain download URL for project %@, file %@", projID, fileID]];
+                    [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+                });
+                dispatch_semaphore_signal(downloadSemaphore);
+                return;
+            } else if (!downloadUrl) {
+                downloader.progress.completedUnitCount++;
+                dispatch_semaphore_signal(downloadSemaphore);
+                continue;
+            }
+            
+            NSString *fileName = downloadUrl.lastPathComponent;
+            NSString *destModPath = [destPath stringByAppendingPathComponent:[NSString stringWithFormat:@"mods/%@", fileName]];
+            
+            NSString *sha1 = [self getSha1ForProject:projID file:fileID];
+            NSURLSessionDownloadTask *subTask = [downloader createDownloadTask:downloadUrl
+                                                                         size:0
+                                                                          sha:sha1
+                                                                      altName:nil
+                                                                       toPath:destModPath];
+            if (subTask) {
+                [downloader.fileList addObject:[NSString stringWithFormat:@"mods/%@", fileName]];
+                [subTask addObserver:self forKeyPath:@"state" options:NSKeyValueObservingOptionNew context:(__bridge void *)downloadSemaphore];
+                [subTask resume];
+            } else if (!downloader.progress.cancelled) {
+                downloader.progress.completedUnitCount++;
+                dispatch_semaphore_signal(downloadSemaphore);
+            } else {
+                dispatch_semaphore_signal(downloadSemaphore);
+                return;
+            }
+        }
+        
+        // Extract overrides folder.
+        NSString *overridesDir = @"overrides";
+        if ([manifest[@"overrides"] isKindOfClass:[NSString class]] && [manifest[@"overrides"] length] > 0) {
+            overridesDir = manifest[@"overrides"];
+        }
+        [ModpackUtils archive:archive extractDirectory:overridesDir toPath:destPath error:&error];
+        if (error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [downloader finishDownloadWithErrorString:
+                 [NSString stringWithFormat:@"[CurseForgeAPI] Could not extract overrides: %@", error.localizedDescription]];
+                [self fallbackOpenBrowserWithURL:self.fallbackZipUrl];
+            });
+            return;
+        }
+        
+        // Cleanup: Delete the modpack zip.
+        [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
+        
+        // Update profile with modpack info on the main thread.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
+            NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
+            NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
+            NSString *iconBase64 = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
+            
+            NSDictionary *minecraftDict = manifest[@"minecraft"];
+            NSString *depID = @"";
+            if ([minecraftDict isKindOfClass:[NSDictionary class]]) {
+                NSArray *modLoaders = minecraftDict[@"modLoaders"];
+                if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
+                    NSDictionary *primaryModLoader = nil;
+                    for (NSDictionary *loader in modLoaders) {
+                        if ([loader[@"primary"] boolValue]) {
+                            primaryModLoader = loader;
+                            break;
+                        }
+                    }
+                    if (!primaryModLoader) {
+                        primaryModLoader = modLoaders.firstObject;
+                    }
+                    if ([primaryModLoader[@"id"] isKindOfClass:[NSString class]]) {
+                        depID = primaryModLoader[@"id"];
+                    }
                 }
             }
-            if (!primaryModLoader) {
-                primaryModLoader = modLoaders.firstObject;
-            }
-            if ([primaryModLoader[@"id"] isKindOfClass:[NSString class]]) {
-                depID = primaryModLoader[@"id"];
-            }
-        }
-    }
-    
-    PLProfiles *profiles = [PLProfiles current];
-    profiles.profiles[packName] = [@{
-        @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
-        @"name": packName,
-        @"lastVersionId": depID ?: @"",
-        @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@", iconBase64]
-    } mutableCopy];
-    profiles.selectedProfileName = packName;
-    
-    NSLog(@"[CurseForgeAPI] CF modpack installed: %@", packName);
+            
+            PLProfiles *profiles = [PLProfiles current];
+            profiles.profiles[packName] = [@{
+                @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
+                @"name": packName,
+                @"lastVersionId": depID ?: @"",
+                @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@", iconBase64]
+            } mutableCopy];
+            profiles.selectedProfileName = packName;
+            
+            NSLog(@"[CurseForgeAPI] CF modpack installed: %@", packName);
+        });
+    });
 }
 
 #pragma mark - KVO for Download Task Completion
