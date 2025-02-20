@@ -12,7 +12,7 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 @interface CurseForgeAPI ()
 // Used for fallback integrated browser when errors occur.
 @property (nonatomic, strong) NSString *fallbackZipUrl;
-// Pending modpack detail and index – used to defer download until user confirms.
+// Pending modpack detail and version index – used to defer download until the user presses Play.
 @property (nonatomic, strong) NSDictionary *pendingModpackDetail;
 @property (nonatomic, assign) NSInteger pendingModpackIndex;
 @end
@@ -281,10 +281,11 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
     self.pendingModpackDetail = detail;
     self.pendingModpackIndex = index;
     
-    // Notify the UI (via notification) that the modpack is ready for user to press "Play".
+    // Notify the UI (via notification) that the modpack is ready for the user to press "Play".
     [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackReadyForPlay" object:self];
 }
 
+/// New method: Call this to start the pending download (when the user presses "Play").
 - (void)startPendingDownload {
     if (!self.pendingModpackDetail) {
         NSLog(@"startPendingDownload: No pending modpack detail available");
@@ -318,7 +319,6 @@ static const NSInteger kCurseForgeClassIDMod      = 6;
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
-    // Offload heavy file operations to a background queue.
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error;
         UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
@@ -347,7 +347,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             return;
         }
         
-        // Verify manifest – must be a valid minecraftModpack.
         if (!([manifest[@"manifestType"] isEqualToString:@"minecraftModpack"] &&
               [manifest[@"manifestVersion"] integerValue] == 1 &&
               manifest[@"minecraft"] &&
@@ -372,7 +371,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         }
         downloader.progress.totalUnitCount = filesArr.count;
         
-        // Limit concurrent downloads to 5.
         dispatch_semaphore_t downloadSemaphore = dispatch_semaphore_create(5);
         
         for (NSDictionary *cfFile in filesArr) {
@@ -418,7 +416,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             }
         }
         
-        // Extract overrides folder.
         NSString *overridesDir = @"overrides";
         if ([manifest[@"overrides"] isKindOfClass:[NSString class]] && [manifest[@"overrides"] length] > 0) {
             overridesDir = manifest[@"overrides"];
@@ -433,10 +430,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             return;
         }
         
-        // Cleanup: Delete the modpack zip.
         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
         
-        // Update profile with modpack info on the main thread.
         dispatch_async(dispatch_get_main_queue(), ^{
             NSString *packName = ([manifest[@"name"] isKindOfClass:[NSString class]] ? manifest[@"name"] : @"CF_Pack");
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
@@ -518,7 +513,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return dataVal;
     }
     
-    // Fallback: fetch file details and construct URL manually.
     endpoint = [NSString stringWithFormat:@"mods/%@/files/%@", projID, fileID];
     NSDictionary *fallback = [self getEndpoint:endpoint params:params];
     NSLog(@"getDownloadURLForProject: Fallback response from %@: %@", endpoint, fallback);
