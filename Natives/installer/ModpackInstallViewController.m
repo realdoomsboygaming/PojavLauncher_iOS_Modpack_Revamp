@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UIImage *fallbackImage;
+@property (nonatomic, strong) UIMenu *currentMenu;
 @end
 
 @implementation ModpackInstallViewController
@@ -253,20 +254,20 @@ NS_ASSUME_NONNULL_BEGIN
 #pragma mark - Context Menu (iOS 13+)
 
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tableView
-   contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
-                                       point:(CGPoint)point {
+contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
+                                    point:(CGPoint)point {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
-                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
         return self.currentMenu;
     }];
 }
 
 - (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-                         configurationForMenuAtLocation:(CGPoint)location {
+                 configurationForMenuAtLocation:(CGPoint)location {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
-                                                      actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
         return self.currentMenu;
     }];
 }
@@ -293,7 +294,7 @@ NS_ASSUME_NONNULL_BEGIN
         
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
-                                                              handler:^(UIAlertAction * _Nonnull action) {
+                                                              handler:^(UIAlertAction *action) {
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             NSData *imgData = UIImagePNGRepresentation(cell.imageView.image);
             [imgData writeToFile:tmpIconPath atomically:YES];
@@ -380,3 +381,4 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 NS_ASSUME_NONNULL_END
+
