@@ -12,6 +12,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @property (nonatomic, strong) UIMenu *currentMenu;
+// New property to keep track of the previous search text so we only update when it changes.
+@property (nonatomic, copy) NSString *previousSearchText;
 @end
 
 @implementation ModpackInstallViewController
@@ -47,6 +49,9 @@ NS_ASSUME_NONNULL_BEGIN
     self.modrinth = [ModrinthAPI new];
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
+    
+    // Initialize previousSearchText to an empty string so that first search always runs.
+    self.previousSearchText = @"";
     
     [self updateSearchResults];
 }
@@ -119,13 +124,14 @@ NS_ASSUME_NONNULL_BEGIN
 #pragma mark - Loading Search Results
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
-    NSString *name = self.searchController.searchBar.text ?: @"";
-    self.filters[@"name"] = name;
-    
-    NSString *previousName = self.filters[@"name"];
-    if (!prevList && [previousName isEqualToString:name]) {
+    NSString *currentSearchText = self.searchController.searchBar.text ?: @"";
+    // Only trigger a new search if the search text has changed or if we're loading a next page.
+    if (!prevList && [self.previousSearchText isEqualToString:currentSearchText]) {
         return;
     }
+    // Update the stored previous search text.
+    self.previousSearchText = currentSearchText;
+    self.filters[@"name"] = currentSearchText;
     
     [self switchToLoadingState];
     
