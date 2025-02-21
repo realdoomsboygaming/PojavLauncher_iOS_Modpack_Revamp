@@ -7,9 +7,9 @@
 #import "modpack/CurseForgeAPI.h"
 #import "modpack/ModrinthAPI.h"
 
-NS_ASSUME_NONNULL_BEGIN
+NS_ASSUME_NONNULL_BEGIN  // Begin nonnull assumptions
 
-@interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
+@interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource, UIContextMenuInteractionDelegate>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @property (nonatomic, strong) UIMenu *currentMenu;
 @property (nonatomic, copy) NSString *previousSearchText;
@@ -24,17 +24,20 @@ NS_ASSUME_NONNULL_BEGIN
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     
+    // Setup search controller for iOS 14
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
+    // Setup API selection segmented control
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
     self.apiSegmentControl.selectedSegmentIndex = 0;
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
     [self.apiSegmentControl addTarget:self action:@selector(apiSegmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
     
+    // Initialize CurseForge API if key is stored, otherwise prompt and fallback to Modrinth
     NSString *storedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (storedKey.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:storedKey];
@@ -48,20 +51,24 @@ NS_ASSUME_NONNULL_BEGIN
     self.modrinth = [ModrinthAPI new];
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    self.previousSearchText = @"";
+    self.previousSearchText = @""; // Ensure first search runs
     
     [self updateSearchResults];
 }
 
 - (void)promptForCurseForgeAPIKey {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key" message:@"Please enter your CurseForge API key" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
+                                                                   message:@"Please enter your CurseForge API key"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"Your CF API Key here";
         textField.secureTextEntry = NO;
     }];
     
     __weak typeof(self) weakSelf = self;
-    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction * _Nonnull action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         NSString *key = alert.textFields.firstObject.text ?: @"";
         if (key.length > 0) {
@@ -77,7 +84,9 @@ NS_ASSUME_NONNULL_BEGIN
     }];
     [alert addAction:okAction];
     
-    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
+                                                           style:UIAlertActionStyleCancel
+                                                         handler:^(UIAlertAction * _Nonnull action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         strongSelf.apiSegmentControl.selectedSegmentIndex = 1;
         [strongSelf updateSearchResults];
@@ -164,11 +173,13 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    // Configure cell with image and text
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
         cell.imageView.contentMode = UIViewContentModeScaleAspectFit;
         cell.imageView.clipsToBounds = YES;
+        // Add context menu interaction for iOS 14
         UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
         [cell addInteraction:interaction];
     }
@@ -185,12 +196,38 @@ NS_ASSUME_NONNULL_BEGIN
     }
     
     BOOL usingCurseForge = (self.apiSegmentControl.selectedSegmentIndex == 0);
-    BOOL reachedLastPage = usingCurseForge ? [(CurseForgeAPI *)self.curseForge reachedLastPage] : [self.modrinth reachedLastPage];
+    BOOL reachedLastPage = usingCurseForge ? ([(CurseForgeAPI *)self.curseForge reachedLastPage]) : ([self.modrinth reachedLastPage]);
     if (!reachedLastPage && indexPath.row == self.list.count - 1) {
         [self loadSearchResultsWithPrevList:YES];
     }
     
     return cell;
+}
+
+// Implements image loading for cell icons
+- (void)loadImageForCell:(UITableViewCell *)cell withURL:(NSString *)urlString {
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url) return;
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url
+                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (!error && data) {
+            UIImage *img = [UIImage imageWithData:data];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                cell.imageView.image = img ?: self.fallbackImage;
+                [cell setNeedsLayout];
+            });
+        }
+    }];
+    [task resume];
+}
+
+// Required method for UIContextMenuInteractionDelegate
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil
+                                                       previewProvider:nil
+                                                        actionProvider:^UIMenu * _Nullable(NSArray *suggestedActions) {
+        return self.currentMenu;
+    }];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -212,7 +249,6 @@ NS_ASSUME_NONNULL_BEGIN
                 });
             }];
         } else {
-            // Show loading indicator for modrinth to prevent UI freeze
             UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
             UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
             indicator.center = cell.contentView.center;
@@ -301,8 +337,8 @@ NS_ASSUME_NONNULL_BEGIN
     [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
-@end
+NS_ASSUME_NONNULL_END  // End nonnull assumptions
 
-NS_ASSUME_NONNULL_END
+@end
 
 NS_ASSUME_NONNULL_END
