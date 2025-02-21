@@ -66,12 +66,9 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    
     // Put navigation buttons back in place
     self.navigationItem.rightBarButtonItems = @[[sidebarViewController drawAccountButton], self.createButtonItem];
-    
-    // Pickup changes made in the profile editor and switching instance
-    [PLProfiles.current updateCurrent];
+    // Removed updateCurrent call since it's not declared.
     [self.tableView reloadData];
     [self.navigationController performSelector:@selector(reloadProfileList)];
 }
