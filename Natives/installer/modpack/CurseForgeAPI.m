@@ -234,15 +234,21 @@
         return;
     }
     
-    NSArray *files = manifestDict[@"files"];
-    if (![files isKindOfClass:[NSArray class]]) {
-        [downloader finishDownloadWithErrorString:@"Manifest files missing"];
-        return;
+    // Deduplicate the file entries based on projectID and fileID.
+    NSArray *allFiles = manifestDict[@"files"];
+    NSMutableArray *files = [NSMutableArray new];
+    NSMutableSet *uniqueKeys = [NSMutableSet new];
+    for (NSDictionary *fileEntry in allFiles) {
+        NSString *uniqueKey = [NSString stringWithFormat:@"%@-%@", fileEntry[@"projectID"], fileEntry[@"fileID"]];
+        if (![uniqueKeys containsObject:uniqueKey]) {
+            [uniqueKeys addObject:uniqueKey];
+            [files addObject:fileEntry];
+        }
     }
     
     NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
     
-    // Pre-calculate total download tasks.
+    // Pre-calculate total download tasks from deduplicated files.
     NSUInteger totalDownloads = 0;
     for (NSDictionary *fileEntry in files) {
         NSNumber *projectID = fileEntry[@"projectID"];
@@ -255,7 +261,7 @@
     }
     downloader.progress.totalUnitCount = totalDownloads;
     
-    // Process each file entry.
+    // Process each deduplicated file entry.
     for (NSDictionary *fileEntry in files) {
         NSNumber *projectID = fileEntry[@"projectID"];
         NSNumber *fileID = fileEntry[@"fileID"];
@@ -274,7 +280,7 @@
             continue;
         }
         
-        // Determine actual file name.
+        // Determine the actual file name.
         NSString *relativePath = fileEntry[@"path"];
         if (!relativePath || relativePath.length == 0) {
             relativePath = fileEntry[@"fileName"];
@@ -288,7 +294,7 @@
         }
         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
         
-        // Use fileLength from the manifest if available, default to 1.
+        // Use fileLength from the manifest if available; default to 1.
         NSUInteger fileSize = 1;
         if (fileEntry[@"fileLength"] && [fileEntry[@"fileLength"] respondsToSelector:@selector(unsignedIntegerValue)]) {
             fileSize = [fileEntry[@"fileLength"] unsignedIntegerValue];
@@ -321,7 +327,7 @@
         [task resume];
     }
     
-    // Process version and profile information.
+    // Process version and profile information...
     NSDictionary *minecraft = manifestDict[@"minecraft"];
     NSString *vanillaVersion = @"";
     NSString *modLoaderId = @"";
