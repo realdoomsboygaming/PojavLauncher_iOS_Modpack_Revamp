@@ -13,12 +13,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) UIImage *fallbackImage;
 @property (nonatomic, strong) UIMenu *currentMenu;
 @property (nonatomic, copy) NSString *previousSearchText;
-@property (nonatomic, strong) UISearchController *searchController;
-@property (nonatomic, strong) UISegmentedControl *apiSegmentControl;
-@property (nonatomic, strong) NSMutableArray *list;
-@property (nonatomic, strong) NSMutableDictionary *filters;
-@property (nonatomic, strong) CurseForgeAPI *curseForge;
-@property (nonatomic, strong) ModrinthAPI *modrinth;
 @end
 
 @implementation ModpackInstallViewController
@@ -28,15 +22,18 @@ NS_ASSUME_NONNULL_BEGIN
     self.definesPresentationContext = YES;
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
+    
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
+    
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
     self.apiSegmentControl.selectedSegmentIndex = 0;
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
     [self.apiSegmentControl addTarget:self action:@selector(apiSegmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
+    
     NSString *storedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (storedKey.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:storedKey];
@@ -46,20 +43,27 @@ NS_ASSUME_NONNULL_BEGIN
             [self promptForCurseForgeAPIKey];
         }
     }
+    
     self.modrinth = [ModrinthAPI new];
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
     self.previousSearchText = @"";
     self.list = [NSMutableArray new];
+    
     [self updateSearchResults];
 }
 
 - (void)promptForCurseForgeAPIKey {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key" message:@"Please enter your CurseForge API key" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
+                                                                   message:@"Please enter your CurseForge API key"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"Your CF API Key here";
     }];
-    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+    
+    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction * _Nonnull action) {
         NSString *key = alert.textFields.firstObject.text ?: @"";
         if (key.length > 0) {
             [[NSUserDefaults standardUserDefaults] setObject:key forKey:@"CURSEFORGE_API_KEY"];
@@ -73,11 +77,15 @@ NS_ASSUME_NONNULL_BEGIN
         }
     }];
     [alert addAction:okAction];
-    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
+    
+    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
+                                                           style:UIAlertActionStyleCancel
+                                                         handler:^(UIAlertAction * _Nonnull action) {
         self.apiSegmentControl.selectedSegmentIndex = 1;
         [self updateSearchResults];
     }];
     [alert addAction:cancelAction];
+    
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -106,7 +114,9 @@ NS_ASSUME_NONNULL_BEGIN
     }
     self.previousSearchText = currentSearchText;
     self.filters[@"name"] = currentSearchText;
+    
     [self switchToLoadingState];
+    
     if (self.apiSegmentControl.selectedSegmentIndex == 0) {
         if (!self.curseForge) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -127,7 +137,6 @@ NS_ASSUME_NONNULL_BEGIN
     } else {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:self.list];
-            NSError *searchError = self.modrinth.lastError;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
                     self.list = results;
