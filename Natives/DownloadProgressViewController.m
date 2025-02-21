@@ -23,7 +23,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 - (void)loadView {
     [super loadView];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
+         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = NO;
     
     // Load WFWorkflowProgressView from private framework.
@@ -93,7 +93,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         cell.accessoryView = progressView;
     }
     
-    // Remove any previously associated progress from the cell.
+    // Remove any previously associated progress.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, @"progress");
     if (oldProgress) {
         objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
@@ -102,7 +102,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         } @catch (NSException *exception) {}
     }
     
-    // Defensive check: if progressList is missing an item at index, create a dummy progress.
+    // Defensive check: if progressList does not contain an object for this row, create a dummy progress.
     NSProgress *progress = nil;
     if (indexPath.row < self.task.progressList.count) {
         progress = self.task.progressList[indexPath.row];
