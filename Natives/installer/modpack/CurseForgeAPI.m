@@ -240,7 +240,6 @@
             return;
         }
         
-        // Retrieve modpack name for error messages.
         NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
         
         // Pre-calculate total download tasks.
@@ -275,7 +274,7 @@
                 continue;
             }
             
-            // Determine the actual file name.
+            // Determine actual file name.
             NSString *relativePath = fileEntry[@"path"];
             if (!relativePath || relativePath.length == 0) {
                 relativePath = fileEntry[@"fileName"];
@@ -289,7 +288,14 @@
             }
             NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
             
-            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:0 sha:nil altName:nil toPath:destinationPath];
+            // Use fileLength from the manifest if available, default to 1.
+            NSUInteger fileSize = 1;
+            if (fileEntry[@"fileLength"] && [fileEntry[@"fileLength"] respondsToSelector:@selector(unsignedIntegerValue)]) {
+                fileSize = [fileEntry[@"fileLength"] unsignedIntegerValue];
+                if (fileSize == 0) { fileSize = 1; }
+            }
+            
+            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:fileSize sha:nil altName:nil toPath:destinationPath];
             if (task) {
                 [downloader.fileList addObject:relativePath];
                 [task resume];
@@ -311,11 +317,11 @@
         NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
         if (depInfo[@"json"]) {
             NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
-            NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:0 sha:nil altName:nil toPath:jsonPath];
+            NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
             [task resume];
         }
         
-        // Process version and profile information.
+        // Process version and profile information...
         NSDictionary *minecraft = manifestDict[@"minecraft"];
         NSString *vanillaVersion = @"";
         NSString *modLoaderId = @"";
@@ -368,13 +374,14 @@
                 @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
                 @"name": profileName,
                 @"lastVersionId": finalVersionString,
-                @"icon": @"" // Icon extraction can be implemented if desired.
+                @"icon": @""
             };
             PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
             PLProfiles.current.selectedProfileName = profileName;
         }
     });
 }
+
 
 #pragma mark - Helper Methods
 
