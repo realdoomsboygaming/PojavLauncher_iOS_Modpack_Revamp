@@ -23,8 +23,8 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     [super loadView];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
-    self.tableView.allowsSelection = NO;
-    // No accessory view needed; we'll use the cell’s accessoryType.
+    self.tableView.allowsSelection = YES;
+    // No accessory view is set for cells; we use accessoryType for checkmarks.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -78,28 +78,34 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     // Dequeue a reusable cell.
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
-    
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
-        cell.accessoryType = UITableViewCellAccessoryNone;
+       cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
+       cell.accessoryType = UITableViewCellAccessoryNone;
     }
+    
+    // Safely get file name.
+    NSString *fileName = @"";
+    if (indexPath.row < self.task.fileList.count) {
+       fileName = self.task.fileList[indexPath.row];
+    }
+    cell.textLabel.text = fileName;
     
     // Remove any previous observer.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, @"progress");
     if (oldProgress) {
-        objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
-        @try {
-            [oldProgress removeObserver:self forKeyPath:@"fractionCompleted"];
-        } @catch (NSException *exception) {}
+       objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
+       @try {
+         [oldProgress removeObserver:self forKeyPath:@"fractionCompleted"];
+       } @catch (NSException *exception) {}
     }
     
-    // Defensive: if the progressList doesn't have an object at this index, create a dummy.
+    // Obtain NSProgress for this row.
     NSProgress *progress = nil;
     if (indexPath.row < self.task.progressList.count) {
-        progress = self.task.progressList[indexPath.row];
+       progress = self.task.progressList[indexPath.row];
     } else {
-        progress = [NSProgress progressWithTotalUnitCount:1];
-        progress.completedUnitCount = 0;
+       progress = [NSProgress progressWithTotalUnitCount:1];
+       progress.completedUnitCount = 0;
     }
     
     objc_setAssociatedObject(cell, @"progress", progress, OBJC_ASSOCIATION_ASSIGN);
@@ -108,7 +114,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
                 options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
                 context:CellProgressObserverContext];
     
-    cell.textLabel.text = self.task.fileList[indexPath.row];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f%%", progress.fractionCompleted * 100];
     cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     
