@@ -1,33 +1,24 @@
-#import "installer/FabricUtils.h"
 #import "ModpackUtils.h"
+#import "installer/FabricUtils.h"
 
 @implementation ModpackUtils
 
-+ (void)archive:(UZKArchive *)archive extractDirectory:(NSString *)dir toPath:(NSString *)path error:(NSError *__autoreleasing*)error {
++ (void)archive:(UZKArchive *)archive extractDirectory:(NSString *)dir toPath:(NSString *)path error:(NSError *__autoreleasing *)error {
     [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
-        if (![fileInfo.filename hasPrefix:dir] ||
-            fileInfo.filename.length <= dir.length) {
-            return;
-        }
+        if (![fileInfo.filename hasPrefix:dir] || fileInfo.filename.length <= dir.length) return;
         NSString *fileName = [fileInfo.filename substringFromIndex:dir.length+1];
         NSString *destItemPath = [path stringByAppendingPathComponent:fileName];
         NSString *destDirPath = fileInfo.isDirectory ? destItemPath : destItemPath.stringByDeletingLastPathComponent;
-        BOOL createdDir = [NSFileManager.defaultManager createDirectoryAtPath:destDirPath
-            withIntermediateDirectories:YES
-            attributes:nil error:error];
+        BOOL createdDir = [[NSFileManager defaultManager] createDirectoryAtPath:destDirPath withIntermediateDirectories:YES attributes:nil error:error];
         if (!createdDir) {
             *stop = YES;
             return;
         } else if (fileInfo.isDirectory) {
             return;
         }
-
         NSData *data = [archive extractData:fileInfo error:error];
         BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:error];
-        *stop = !data || !written;
-        if (!*stop) {
-            NSLog(@"[ModpackDL] Extracted %@", fileInfo.filename);
-        }
+        *stop = (!data || !written);
     } error:error];
 }
 
@@ -38,10 +29,10 @@
         info[@"id"] = [NSString stringWithFormat:@"%@-forge-%@", minecraftVersion, dependency[@"forge"]];
     } else if (dependency[@"fabric-loader"]) {
         info[@"id"] = [NSString stringWithFormat:@"fabric-loader-%@-%@", dependency[@"fabric-loader"], minecraftVersion];
-        info[@"json"] = [NSString stringWithFormat:FabricUtils.endpoints[@"Fabric"][@"json"], minecraftVersion, dependency[@"fabric-loader"]];
+        info[@"json"] = [NSString stringWithFormat:[FabricUtils endpoints][@"Fabric"][@"json"], minecraftVersion, dependency[@"fabric-loader"]];
     } else if (dependency[@"quilt-loader"]) {
         info[@"id"] = [NSString stringWithFormat:@"quilt-loader-%@-%@", dependency[@"quilt-loader"], minecraftVersion];
-        info[@"json"] = [NSString stringWithFormat:FabricUtils.endpoints[@"Quilt"][@"json"], minecraftVersion, dependency[@"quilt-loader"]];
+        info[@"json"] = [NSString stringWithFormat:[FabricUtils endpoints][@"Quilt"][@"json"], minecraftVersion, dependency[@"quilt-loader"]];
     }
     return info;
 }
