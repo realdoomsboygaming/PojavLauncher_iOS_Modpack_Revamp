@@ -221,8 +221,8 @@ NS_ASSUME_NONNULL_BEGIN  // Begin nonnull assumptions
     [task resume];
 }
 
-// Required method for UIContextMenuInteractionDelegate
-- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+// Required method for UIContextMenuInteractionDelegate (return type marked as nullable)
+- (nullable UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                        previewProvider:nil
                                                         actionProvider:^UIMenu * _Nullable(NSArray *suggestedActions) {
@@ -340,5 +340,3 @@ NS_ASSUME_NONNULL_BEGIN  // Begin nonnull assumptions
 NS_ASSUME_NONNULL_END  // End nonnull assumptions
 
 @end
-
-NS_ASSUME_NONNULL_END
