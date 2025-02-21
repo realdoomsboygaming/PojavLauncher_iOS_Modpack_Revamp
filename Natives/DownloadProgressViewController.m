@@ -26,13 +26,12 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = NO;
     
-    // Load WFWorkflowProgressView (private framework)
+    // Load WFWorkflowProgressView from private framework.
     dlopen("/System/Library/PrivateFrameworks/WorkflowUIServices.framework/WorkflowUIServices", RTLD_GLOBAL);
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    // Observe overall progress updates
     [self.task.textProgress addObserver:self
                              forKeyPath:@"fractionCompleted"
                                 options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
@@ -94,7 +93,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         cell.accessoryView = progressView;
     }
     
-    // Remove any previous observer from the cell's associated progress.
+    // Remove any previously associated progress from the cell.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, @"progress");
     if (oldProgress) {
         objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
@@ -103,7 +102,15 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         } @catch (NSException *exception) {}
     }
     
-    NSProgress *progress = self.task.progressList[indexPath.row];
+    // Defensive check: if progressList is missing an item at index, create a dummy progress.
+    NSProgress *progress = nil;
+    if (indexPath.row < self.task.progressList.count) {
+        progress = self.task.progressList[indexPath.row];
+    } else {
+        progress = [NSProgress progressWithTotalUnitCount:1];
+        progress.completedUnitCount = 0;
+    }
+    
     objc_setAssociatedObject(cell, @"progress", progress, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(progress, @"cell", cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [progress addObserver:self forKeyPath:@"fractionCompleted"
