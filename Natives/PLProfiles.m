@@ -4,13 +4,10 @@
 
 static PLProfiles* current;
 
-@interface PLProfiles()
-@end
-
 @implementation PLProfiles
 
-+ (id)defaultProfiles {
-    return @{
++ (NSDictionary *)defaultProfiles {
+    return [@{
         @"profiles": @{
             @"(Default)": @{
                 @"name": @"(Default)",
@@ -18,7 +15,7 @@ static PLProfiles* current;
             }
         },
         @"selectedProfile": @"(Default)"
-    }.mutableCopy;
+    } mutableCopy];
 }
 
 + (PLProfiles *)current {
@@ -32,60 +29,48 @@ static PLProfiles* current;
     current = [[PLProfiles alloc] initWithCurrentInstance];
 }
 
-+ (id)profile:(NSMutableDictionary *)profile resolveKey:(id)key {
-    NSString *value = profile[key];
-    if (value.length > 0) {
-        //NSDebugLog(@"[PLProfiles] Applying %@: \"%@\"", key, value);
-        return value;
-    }
-
-    NSDictionary *valueDefaults = @{
-        @"javaVersion": @"0",
-        @"gameDir": @"."
-    };
-    if (valueDefaults[key]) {
-        return valueDefaults[key];
-    }
-
-    NSDictionary *prefDefaults = @{
-        @"defaultTouchCtrl": @"control.default_ctrl",
-        @"defaultGamepadCtrl": @"control.default_gamepad_ctrl",
-        @"javaArgs": @"java.java_args",
-        @"renderer": @"video.renderer"
-    };
-    return getPrefObject(prefDefaults[key]);
-}
-
-+ (id)resolveKeyForCurrentProfile:(id)key {
++ (NSString *)resolveKeyForCurrentProfile:(id)key {
     return [self profile:self.current.selectedProfile resolveKey:key];
 }
 
-- (id)initWithCurrentInstance {
++ (id)profile:(NSMutableDictionary *)profile resolveKey:(id)key {
+    NSString *value = profile[key];
+    if (value.length > 0) {
+        return value;
+    }
+    NSDictionary *valueDefaults = @{@"javaVersion": @"0", @"gameDir": @"."};
+    if (valueDefaults[key]) {
+        return valueDefaults[key];
+    }
+    NSDictionary *prefDefaults = @{@"defaultTouchCtrl": @"control.default_ctrl", @"defaultGamepadCtrl": @"control.default_gamepad_ctrl", @"javaArgs": @"java.java_args", @"renderer": @"video.renderer"};
+    return getPrefObject(prefDefaults[key]);
+}
+
+- (instancetype)initWithCurrentInstance {
     self = [super init];
     self.profilePath = [@(getenv("POJAV_GAME_DIR")) stringByAppendingPathComponent:@"launcher_profiles.json"];
     self.profileDict = parseJSONFromFile(self.profilePath);
     if (self.profileDict[@"NSErrorObject"]) {
-        self.profileDict = PLProfiles.defaultProfiles;
+        self.profileDict = [PLProfiles defaultProfiles];
         [self save];
     }
-
     return self;
 }
 
-- (id)profiles {
+- (NSMutableDictionary *)profiles {
     return self.profileDict[@"profiles"];
 }
 
-- (id)selectedProfile {
+- (NSMutableDictionary *)selectedProfile {
     return self.profiles[self.selectedProfileName];
 }
 
 - (NSString *)selectedProfileName {
-    return (id)self.profileDict[@"selectedProfile"];
+    return self.profileDict[@"selectedProfile"];
 }
 
 - (void)setSelectedProfileName:(NSString *)name {
-    self.profileDict[@"selectedProfile"] = (id)name;
+    self.profileDict[@"selectedProfile"] = name;
     [self save];
 }
 
