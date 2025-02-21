@@ -1,5 +1,4 @@
-#include <CommonCrypto/CommonDigest.h>
-
+#import <CommonCrypto/CommonDigest.h>
 #import "authenticator/BaseAuthenticator.h"
 #import "installer/modpack/ModpackAPI.h"
 #import "AFNetworking.h"
@@ -19,7 +18,6 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Use default configuration (adjust as needed for background downloads)
         NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
         configuration.timeoutIntervalForRequest = 86400;
         self.manager = [[AFURLSessionManager alloc] initWithSessionConfiguration:configuration];
@@ -29,7 +27,6 @@
     return self;
 }
 
-// Updated createDownloadTask: method – on completion we manually trigger KVO for fractionCompleted
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url size:(NSUInteger)size sha:(NSString *)sha altName:(NSString *)altName toPath:(NSString *)path success:(void(^)(void))success {
     BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
     if (fileExists && [self checkSHA:sha forFile:path altName:altName]) {
@@ -45,7 +42,6 @@
     __block NSProgress *childProgress = nil;
     NSURLSessionDownloadTask *task = [self.manager downloadTaskWithRequest:request progress:nil destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
         NSLog(@"[MCDL] Downloading %@", name);
-        // Ensure destination directory exists
         [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
         [NSFileManager.defaultManager removeItemAtPath:path error:nil];
         return [NSURL fileURLWithPath:path];
@@ -58,7 +54,6 @@
             [self finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to verify file %@: SHA1 mismatch", path.lastPathComponent]];
         } else {
             if (childProgress) {
-                // Manually trigger KVO for fractionCompleted so observers are updated:
                 [childProgress willChangeValueForKey:@"fractionCompleted"];
                 childProgress.totalUnitCount = childProgress.completedUnitCount;
                 [childProgress didChangeValueForKey:@"fractionCompleted"];
@@ -68,11 +63,9 @@
     }];
     
     if (size && task) {
-        // Directly obtain the NSProgress from the manager.
         childProgress = [self.manager downloadProgressForTask:task];
         [self addChildProgress:childProgress withSize:size];
         [self.fileList addObject:name];
-        // Store the child progress so the UI can reference it.
         [self.progressList addObject:childProgress];
     }
     
@@ -214,7 +207,6 @@
             path = [NSString stringWithFormat:@"%s/assets/objects/%@", getenv("POJAV_GAME_DIR"), pathname];
         }
         
-        // Skip downloading the icon file for macOS.
         if ([name hasSuffix:@"/minecraft.icns"]) {
             [NSFileManager.defaultManager removeItemAtPath:path error:nil];
             continue;
@@ -237,7 +229,6 @@
         [self downloadAssetMetadataWithSuccess:^{
             NSArray *libTasks = [self downloadClientLibraries];
             NSArray *assetTasks = [self downloadClientAssets];
-            // Adjust the initial fake byte
             self.progress.totalUnitCount--;
             self.textProgress.totalUnitCount--;
             if (self.progress.totalUnitCount == 0) {
@@ -250,6 +241,10 @@
             [libTasks makeObjectsPerformSelector:@selector(resume)];
             [assetTasks makeObjectsPerformSelector:@selector(resume)];
             [self.metadata removeObjectForKey:@"assetIndexObj"];
+            // Notify that modpack download is complete
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackDownloadCompleted" object:nil];
+            });
         }];
     }];
 }
@@ -267,6 +262,10 @@
     NSURLSessionDownloadTask *task = [self createDownloadTask:url size:size sha:sha altName:nil toPath:packagePath success:^{
         NSString *destinationPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
         [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
+        // Notify profile view to reload after modpack installation
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"ModpackDownloadCompleted" object:nil];
+        });
     }];
     [task resume];
 }
@@ -280,7 +279,6 @@
     self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    // Set an initial fake byte to prevent premature completion.
     self.progress.totalUnitCount = 1;
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
@@ -315,7 +313,7 @@
     if (sha.length == 0) {
         BOOL existence = [NSFileManager.defaultManager fileExistsAtPath:path];
         if (existence) {
-            NSLog(@"[MCDL] Warning: couldn't find SHA for %@, assuming it's good.", path);
+            NSLog(@"[MCDL] Warning: couldn't find SHA for %@, assuming it's good.", path.lastPathComponent);
         }
         return existence;
     }
@@ -335,10 +333,7 @@
     
     BOOL check = [sha isEqualToString:localSHA];
     if (!check || (getPrefBool(@"general.debug_logging") && logSuccess)) {
-        NSLog(@"[MCDL] SHA1 %@ for %@%@",
-              (check ? @"passed" : @"failed"),
-              (altName ? altName : path.lastPathComponent),
-              (check ? @"" : [NSString stringWithFormat:@" (expected: %@, got: %@)", sha, localSHA]));
+        NSLog(@"[MCDL] SHA1 %@ for %@%@", (check ? @"passed" : @"failed"), (altName ? altName : path.lastPathComponent), (check ? @"" : [NSString stringWithFormat:@" (expected: %@, got: %@)", sha, localSHA]));
     }
     return check;
 }
