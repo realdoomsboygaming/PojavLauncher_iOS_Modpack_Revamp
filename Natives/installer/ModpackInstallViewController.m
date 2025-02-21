@@ -47,9 +47,9 @@ NS_ASSUME_NONNULL_BEGIN
     }
     
     self.modrinth = [ModrinthAPI new];
-    self.filters = [@{@@"isModpack": @(YES), @@"name": @""} mutableCopy];
+    self.filters = [[NSMutableDictionary alloc] initWithObjectsAndKeys:@(YES), @"isModpack", @"", @"name"];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    self.previewImages = [NSMutableDictionary dictionary];
+    self.previewImages = [[NSMutableDictionary alloc] init];
     self.previousSearchText = @""; // so the first search always runs
     
     [self updateSearchResults];
@@ -238,11 +238,11 @@ NS_ASSUME_NONNULL_BEGIN
     
     return [UIContextMenuConfiguration configurationWithIdentifier:item[@"id"]
                                                      previewProvider:^UIViewController * _Nullable(UILargeTitleDisplayMode largeTitleDisplayMode) {
-        UIViewController *previewVC = [UIViewController new];
-        previewVC.view.backgroundColor = .white;
+        UIViewController *previewVC = [[UIViewController alloc] init];
+        previewVC.view.backgroundColor = [UIColor whiteColor];
         
         UIImageView *imageView = [[UIImageView alloc] initWithFrame:CGRectZero];
-        imageView.contentMode = .scaleAspectFit;
+        imageView.contentMode = UIViewContentModeScaleAspectFit;
         NSString *imageUrl = item[@"imageUrl"];
         
         if (imageUrl.length > 0) {
@@ -350,6 +350,15 @@ NS_ASSUME_NONNULL_BEGIN
         parameters:[UIPreviewParameters new]];
     preview.targetRect = cell.frame;
     return preview;
+}
+
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction 
+         configurationForMenuAtLocation:(CGPoint)location {
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil
+                                                     previewProvider:nil
+                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+        return self.currentMenu;
+    }];
 }
 
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
