@@ -269,12 +269,11 @@
                 [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for modpack '%@' and mod '%@'", modpackName, modName]];
                 return;
             } else if (!url) {
-                // Optional file missing URL; count it as completed.
                 downloader.progress.completedUnitCount++;
                 continue;
             }
             
-            // Use actual file name if provided.
+            // Determine the actual file name.
             NSString *relativePath = fileEntry[@"path"];
             if (!relativePath || relativePath.length == 0) {
                 relativePath = fileEntry[@"fileName"];
@@ -375,27 +374,22 @@
     });
 }
 
-
 #pragma mark - Helper Methods
 
-- (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest {
-    if (![manifest[@"manifestType"] isEqualToString:@"minecraftModpack"]) return NO;
-    if ([manifest[@"manifestVersion"] integerValue] != 1) return NO;
-    if (manifest[@"minecraft"] == nil) return NO;
-    NSDictionary *minecraft = manifest[@"minecraft"];
-    if (minecraft[@"version"] == nil) return NO;
-    if (minecraft[@"modLoaders"] == nil) return NO;
-    NSArray *modLoaders = minecraft[@"modLoaders"];
-    return (modLoaders.count >= 1);
-}
-
+// Enhanced getDownloadUrlForProject: method with a retry on the primary endpoint before falling back.
 - (NSString *)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID {
     NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
-    NSDictionary *response = [self getEndpoint:endpoint params:nil];
-    if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
-        return [NSString stringWithFormat:@"%@", response[@"data"]];
+    NSDictionary *response = nil;
+    // Try the primary endpoint with one retry.
+    for (int attempt = 0; attempt < 2; attempt++) {
+        response = [self getEndpoint:endpoint params:nil];
+        if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
+            return [NSString stringWithFormat:@"%@", response[@"data"]];
+        }
+        [NSThread sleepForTimeInterval:0.5];
     }
     
+    // Fallback: build URL using file metadata.
     endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     NSDictionary *fallbackResponse = [self getEndpoint:endpoint params:nil];
     if (fallbackResponse && fallbackResponse[@"data"] && ![fallbackResponse[@"data"] isKindOfClass:[NSNull class]]) {
