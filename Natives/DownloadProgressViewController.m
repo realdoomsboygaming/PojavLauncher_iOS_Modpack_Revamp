@@ -1,7 +1,6 @@
 #import <dlfcn.h>
 #import <objc/runtime.h>
 #import "DownloadProgressViewController.h"
-#import "WFWorkflowProgressView.h"
 
 static void *CellProgressObserverContext = &CellProgressObserverContext;
 static void *TotalProgressObserverContext = &TotalProgressObserverContext;
@@ -25,9 +24,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = NO;
-    
-    // Load WFWorkflowProgressView from private framework.
-    dlopen("/System/Library/PrivateFrameworks/WorkflowUIServices.framework/WorkflowUIServices", RTLD_GLOBAL);
+    // No accessory view needed; we'll use the cell’s accessoryType.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -57,11 +54,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         if (!cell) return;
         dispatch_async(dispatch_get_main_queue(), ^{
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f%%", progress.fractionCompleted * 100];
-            WFWorkflowProgressView *progressView = (WFWorkflowProgressView *)cell.accessoryView;
-            progressView.fractionCompleted = progress.fractionCompleted;
-            if (progress.finished) {
-                [progressView transitionCompletedLayerToVisible:YES animated:YES haptic:NO];
-            }
+            cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         });
     } else if (context == TotalProgressObserverContext) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -83,17 +76,15 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    // Dequeue a reusable cell.
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
-        WFWorkflowProgressView *progressView = [[NSClassFromString(@"WFWorkflowProgressView") alloc] initWithFrame:CGRectMake(0, 0, 30, 30)];
-        progressView.resolvedTintColor = self.view.tintColor;
-        progressView.stopSize = 0;
-        cell.accessoryView = progressView;
+        cell.accessoryType = UITableViewCellAccessoryNone;
     }
     
-    // Remove any previously associated progress.
+    // Remove any previous observer.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, @"progress");
     if (oldProgress) {
         objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
@@ -102,7 +93,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         } @catch (NSException *exception) {}
     }
     
-    // Defensive check: if progressList does not contain an object for this row, create a dummy progress.
+    // Defensive: if the progressList doesn't have an object at this index, create a dummy.
     NSProgress *progress = nil;
     if (indexPath.row < self.task.progressList.count) {
         progress = self.task.progressList[indexPath.row];
@@ -117,16 +108,9 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
                 options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
                 context:CellProgressObserverContext];
     
-    WFWorkflowProgressView *progressView = (WFWorkflowProgressView *)cell.accessoryView;
-    if (progress.finished) {
-        [progressView reset];
-    }
-    progressView.fractionCompleted = progress.fractionCompleted;
-    [progressView transitionCompletedLayerToVisible:progress.finished animated:NO haptic:NO];
-    [progressView transitionRunningLayerToVisible:!progress.finished animated:NO];
-    
     cell.textLabel.text = self.task.fileList[indexPath.row];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f%%", progress.fractionCompleted * 100];
+    cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     
     return cell;
 }
