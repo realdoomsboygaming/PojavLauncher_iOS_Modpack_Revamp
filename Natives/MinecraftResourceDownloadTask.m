@@ -29,8 +29,7 @@
     return self;
 }
 
-// Updated createDownloadTask: method which obtains the NSProgress from the manager,
-// adds it as a child progress, and also stores it in progressList.
+// Updated createDownloadTask: method – on completion we manually trigger KVO for fractionCompleted
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url size:(NSUInteger)size sha:(NSString *)sha altName:(NSString *)altName toPath:(NSString *)path success:(void(^)(void))success {
     BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
     if (fileExists && [self checkSHA:sha forFile:path altName:altName]) {
@@ -59,8 +58,10 @@
             [self finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to verify file %@: SHA1 mismatch", path.lastPathComponent]];
         } else {
             if (childProgress) {
-                // Mark this task's progress as complete.
+                // Manually trigger KVO for fractionCompleted so observers are updated:
+                [childProgress willChangeValueForKey:@"fractionCompleted"];
                 childProgress.totalUnitCount = childProgress.completedUnitCount;
+                [childProgress didChangeValueForKey:@"fractionCompleted"];
             }
             if (success) success();
         }
@@ -82,7 +83,6 @@
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
-// Helper to add a child progress object.
 - (void)addChildProgress:(NSProgress *)childProgress withSize:(NSInteger)size {
     NSUInteger fileSize = size > 0 ? size : 1;
     childProgress.kind = NSProgressKindFile;
