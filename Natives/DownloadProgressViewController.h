@@ -2,8 +2,6 @@
 #import "MinecraftResourceDownloadTask.h"
 
 @interface DownloadProgressViewController : UITableViewController
-@property MinecraftResourceDownloadTask* task;
-
+@property (nonatomic, strong) MinecraftResourceDownloadTask *task;
 - (instancetype)initWithTask:(MinecraftResourceDownloadTask *)task;
-
 @end
