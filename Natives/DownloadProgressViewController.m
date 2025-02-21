@@ -24,7 +24,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = YES;
-    // No accessory view is set for cells; we use accessoryType for checkmarks.
+    // Cells will use the accessoryType for a checkmark when finished.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -83,7 +83,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        cell.accessoryType = UITableViewCellAccessoryNone;
     }
     
-    // Safely get file name.
+    // Safely obtain the file name.
     NSString *fileName = @"";
     if (indexPath.row < self.task.fileList.count) {
        fileName = self.task.fileList[indexPath.row];
@@ -93,13 +93,13 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     // Remove any previous observer.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, @"progress");
     if (oldProgress) {
-       objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
        @try {
          [oldProgress removeObserver:self forKeyPath:@"fractionCompleted"];
        } @catch (NSException *exception) {}
+       objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
     }
     
-    // Obtain NSProgress for this row.
+    // Obtain NSProgress for this row (or create a dummy if missing).
     NSProgress *progress = nil;
     if (indexPath.row < self.task.progressList.count) {
        progress = self.task.progressList[indexPath.row];
@@ -107,9 +107,15 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        progress = [NSProgress progressWithTotalUnitCount:1];
        progress.completedUnitCount = 0;
     }
+    if (!progress) { progress = [NSProgress progressWithTotalUnitCount:1]; }
     
-    objc_setAssociatedObject(cell, @"progress", progress, OBJC_ASSOCIATION_ASSIGN);
-    objc_setAssociatedObject(progress, @"cell", cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    @try {
+       objc_setAssociatedObject(cell, @"progress", progress, OBJC_ASSOCIATION_ASSIGN);
+       objc_setAssociatedObject(progress, @"cell", cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } @catch (NSException *exception) {
+       NSLog(@"Error associating cell with progress: %@", exception);
+    }
+    
     [progress addObserver:self forKeyPath:@"fractionCompleted"
                 options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
                 context:CellProgressObserverContext];
