@@ -2,6 +2,9 @@
 #import <objc/runtime.h>
 #import "DownloadProgressViewController.h"
 
+// Use static const pointers as keys for associated objects.
+static const void *kProgressKey = &kProgressKey;
+static const void *kCellKey = &kCellKey;
 static void *CellProgressObserverContext = &CellProgressObserverContext;
 static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 
@@ -24,7 +27,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = YES;
-    // Cells will use the accessoryType for a checkmark when finished.
+    // Cells will use accessoryType (checkmark) instead of a custom progress view.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -50,7 +53,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
                       ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if (context == CellProgressObserverContext) {
         NSProgress *progress = object;
-        UITableViewCell *cell = objc_getAssociatedObject(progress, @"cell");
+        UITableViewCell *cell = objc_getAssociatedObject(progress, kCellKey);
         if (!cell) return;
         dispatch_async(dispatch_get_main_queue(), ^{
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f%%", progress.fractionCompleted * 100];
@@ -90,16 +93,16 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     }
     cell.textLabel.text = fileName;
     
-    // Remove any previous observer.
-    NSProgress *oldProgress = objc_getAssociatedObject(cell, @"progress");
+    // Remove any previous observer and associated progress.
+    NSProgress *oldProgress = objc_getAssociatedObject(cell, kProgressKey);
     if (oldProgress) {
        @try {
-         [oldProgress removeObserver:self forKeyPath:@"fractionCompleted"];
+           [oldProgress removeObserver:self forKeyPath:@"fractionCompleted"];
        } @catch (NSException *exception) {}
-       objc_setAssociatedObject(oldProgress, @"cell", nil, OBJC_ASSOCIATION_ASSIGN);
+       objc_setAssociatedObject(cell, kProgressKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     
-    // Obtain NSProgress for this row (or create a dummy if missing).
+    // Obtain NSProgress for this row, or create a dummy if missing.
     NSProgress *progress = nil;
     if (indexPath.row < self.task.progressList.count) {
        progress = self.task.progressList[indexPath.row];
@@ -107,15 +110,10 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        progress = [NSProgress progressWithTotalUnitCount:1];
        progress.completedUnitCount = 0;
     }
-    if (!progress) { progress = [NSProgress progressWithTotalUnitCount:1]; }
     
-    @try {
-       objc_setAssociatedObject(cell, @"progress", progress, OBJC_ASSOCIATION_ASSIGN);
-       objc_setAssociatedObject(progress, @"cell", cell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } @catch (NSException *exception) {
-       NSLog(@"Error associating cell with progress: %@", exception);
-    }
-    
+    // Associate the progress with the cell using our static key.
+    objc_setAssociatedObject(cell, kProgressKey, progress, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(progress, kCellKey, cell, OBJC_ASSOCIATION_ASSIGN);
     [progress addObserver:self forKeyPath:@"fractionCompleted"
                 options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
                 context:CellProgressObserverContext];
