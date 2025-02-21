@@ -2,7 +2,7 @@
 #import <objc/runtime.h>
 #import "DownloadProgressViewController.h"
 
-// Static keys for associated objects.
+// Use static const pointers for associated object keys.
 static const void *kProgressKey = &kProgressKey;
 static const void *kCellKey = &kCellKey;
 static void *CellProgressObserverContext = &CellProgressObserverContext;
@@ -28,18 +28,20 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = NO;
-    // We use the cell's accessoryType to display a checkmark when finished.
+    // We rely on updating each cell's labels via our timer and KVO without reloading the table entirely.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    // Observe overall progress changes.
     [self.task.textProgress addObserver:self
                              forKeyPath:@"fractionCompleted"
-                                options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
+                                options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                                 context:TotalProgressObserverContext];
+    // Start a timer to update visible cells every 0.5 seconds.
     self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
                                                          target:self
-                                                       selector:@selector(refreshTableView)
+                                                       selector:@selector(updateVisibleCells)
                                                        userInfo:nil
                                                         repeats:YES];
 }
@@ -53,9 +55,22 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.refreshTimer = nil;
 }
 
-- (void)refreshTableView {
+- (void)updateVisibleCells {
+    // Update only the visible cells to avoid reloading the entire table.
+    NSArray *visibleIndexPaths = [self.tableView indexPathsForVisibleRows];
+    if (!visibleIndexPaths) { return; }
+    for (NSIndexPath *indexPath in visibleIndexPaths) {
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+        NSProgress *progress = objc_getAssociatedObject(cell, kProgressKey);
+        if (progress) {
+            // Instead of percentage, show "Done" if finished; otherwise, leave detail empty.
+            cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
+            cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        }
+    }
+    // Also update overall title.
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self.tableView reloadData];
+        self.title = [NSString stringWithFormat:@"Downloading (%lu files)", (unsigned long)self.task.fileList.count];
     });
 }
 
@@ -63,6 +78,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
+// KVO observer for individual cell progress updates.
 - (void)observeValueForKeyPath:(NSString *)keyPath
                       ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if (context == CellProgressObserverContext) {
@@ -70,11 +86,11 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         UITableViewCell *cell = objc_getAssociatedObject(progress, kCellKey);
         if (!cell) return;
         dispatch_async(dispatch_get_main_queue(), ^{
-            // Instead of showing percentage, show "Done" if finished.
             cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
             cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
         });
     } else if (context == TotalProgressObserverContext) {
+        // Update the overall title.
         dispatch_async(dispatch_get_main_queue(), ^{
             self.title = [NSString stringWithFormat:@"Downloading (%lu files)", (unsigned long)self.task.fileList.count];
         });
@@ -90,14 +106,14 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Dequeue reusable cell.
+    // Dequeue a reusable cell.
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) {
        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
        cell.accessoryType = UITableViewCellAccessoryNone;
     }
     
-    // Get the file name.
+    // Obtain file name safely.
     NSString *fileName = @"";
     @synchronized(self.task.fileList) {
         if (indexPath.row < self.task.fileList.count) {
@@ -115,7 +131,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        objc_setAssociatedObject(cell, kProgressKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     
-    // Obtain the progress for this row.
+    // Obtain NSProgress for this row, or create a dummy if missing.
     NSProgress *progress = nil;
     @synchronized(self.task.progressList) {
         if (indexPath.row < self.task.progressList.count) {
@@ -127,13 +143,14 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        progress.completedUnitCount = 0;
     }
     
-    // Associate progress with the cell.
+    // Associate the progress with the cell.
     objc_setAssociatedObject(cell, kProgressKey, progress, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(progress, kCellKey, cell, OBJC_ASSOCIATION_ASSIGN);
     [progress addObserver:self forKeyPath:@"fractionCompleted"
-                options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
+                options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                 context:CellProgressObserverContext];
     
+    // Instead of showing percentage, we display "Done" when finished.
     cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
     cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     
