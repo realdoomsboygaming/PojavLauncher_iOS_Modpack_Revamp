@@ -238,7 +238,10 @@
             return;
         }
         
-        // Pre-calculate total download tasks using valid URLs or optional entries.
+        // Retrieve modpack name for error messages.
+        NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
+        
+        // Pre-calculate total download tasks.
         NSUInteger totalDownloads = 0;
         for (NSDictionary *fileEntry in files) {
             NSNumber *projectID = fileEntry[@"projectID"];
@@ -259,7 +262,11 @@
             
             NSString *url = [self getDownloadUrlForProject:[projectID unsignedLongLongValue] fileID:[fileID unsignedLongLongValue]];
             if (!url && required) {
-                [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for project %@ file %@", projectID, fileID]];
+                NSString *modName = fileEntry[@"fileName"];
+                if (!modName || modName.length == 0) {
+                    modName = [NSString stringWithFormat:@"Project %@ File %@", projectID, fileID];
+                }
+                [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for modpack '%@' and mod '%@'", modpackName, modName]];
                 return;
             } else if (!url) {
                 // Optional file missing URL; count it as completed.
@@ -267,7 +274,7 @@
                 continue;
             }
             
-            // Determine the actual file name from manifest or URL.
+            // Use actual file name if provided.
             NSString *relativePath = fileEntry[@"path"];
             if (!relativePath || relativePath.length == 0) {
                 relativePath = fileEntry[@"fileName"];
@@ -367,6 +374,7 @@
         }
     });
 }
+
 
 #pragma mark - Helper Methods
 
