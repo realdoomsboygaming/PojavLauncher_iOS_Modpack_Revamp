@@ -20,7 +20,7 @@
     
     NSDictionary *params = @{
         @"facets": facetString,
-        @"query": [[searchFilters[@"name"] stringByReplacingOccurrencesOfString:@" " withString:@"+"] ?: @""] ,
+        @"query": (searchFilters[@"name"] ? [searchFilters[@"name"] stringByReplacingOccurrencesOfString:@" " withString:@"+"] : @""),
         @"limit": @(limit),
         @"index": @"relevance",
         @"offset": @(modrinthSearchResult.count)
