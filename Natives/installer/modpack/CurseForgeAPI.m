@@ -238,18 +238,18 @@
             return;
         }
         
-        // Pre-calculate number of download tasks to report progress accurately.
-        NSUInteger downloadTaskCount = 0;
+        // Pre-calculate total download tasks using valid URLs or optional entries.
+        NSUInteger totalDownloads = 0;
         for (NSDictionary *fileEntry in files) {
             NSNumber *projectID = fileEntry[@"projectID"];
             NSNumber *fileID = fileEntry[@"fileID"];
             BOOL required = [fileEntry[@"required"] boolValue];
             NSString *url = [self getDownloadUrlForProject:[projectID unsignedLongLongValue] fileID:[fileID unsignedLongLongValue]];
             if (url || !required) {
-                downloadTaskCount++;
+                totalDownloads++;
             }
         }
-        downloader.progress.totalUnitCount = downloadTaskCount;
+        downloader.progress.totalUnitCount = totalDownloads;
         
         // Process each file entry.
         for (NSDictionary *fileEntry in files) {
@@ -262,17 +262,21 @@
                 [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for project %@ file %@", projectID, fileID]];
                 return;
             } else if (!url) {
-                // No download required for this optional file.
+                // Optional file missing URL; count it as completed.
                 downloader.progress.completedUnitCount++;
                 continue;
             }
             
-            // Use the actual file name if provided, rather than the mod ID.
+            // Determine the actual file name from manifest or URL.
             NSString *relativePath = fileEntry[@"path"];
             if (!relativePath || relativePath.length == 0) {
                 relativePath = fileEntry[@"fileName"];
                 if (!relativePath || relativePath.length == 0) {
-                    relativePath = [NSString stringWithFormat:@"%@.jar", fileID];
+                    NSURL *downloadURL = [NSURL URLWithString:url];
+                    relativePath = downloadURL.lastPathComponent;
+                    if (!relativePath || relativePath.length == 0) {
+                        relativePath = [NSString stringWithFormat:@"%@.jar", fileID];
+                    }
                 }
             }
             NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
@@ -303,7 +307,7 @@
             [task resume];
         }
         
-        // Process version information and profile creation as before.
+        // Process version and profile information.
         NSDictionary *minecraft = manifestDict[@"minecraft"];
         NSString *vanillaVersion = @"";
         NSString *modLoaderId = @"";
@@ -363,7 +367,6 @@
         }
     });
 }
-
 
 #pragma mark - Helper Methods
 
