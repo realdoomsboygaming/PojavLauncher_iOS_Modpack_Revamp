@@ -27,16 +27,16 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = NO;
-    // Do not use reloadData so that scroll offset is preserved.
+    // We update visible cells manually to preserve scroll offset.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self.task.textProgress addObserver:self
                              forKeyPath:@"fractionCompleted"
-                                options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
+                                options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                                 context:TotalProgressObserverContext];
-    // Start a timer to update visible cells without reloading the entire table.
+    // Start timer to update only visible cells.
     self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
                                                          target:self
                                                        selector:@selector(updateVisibleCells)
@@ -55,15 +55,25 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 
 - (void)updateVisibleCells {
     NSArray *visibleCells = [self.tableView visibleCells];
+    BOOL allFinished = YES;
     for (UITableViewCell *cell in visibleCells) {
         NSProgress *progress = objc_getAssociatedObject(cell, kProgressKey);
         if (progress) {
-            // Update detail text and accessory without reloading the cell.
+            // Update cell UI directly.
             cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
             cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            if (!progress.finished) {
+                allFinished = NO;
+            }
         }
     }
     self.title = [NSString stringWithFormat:@"Downloading (%lu files)", (unsigned long)self.task.fileList.count];
+    // If all progress objects are finished, dismiss the progress view after a brief delay.
+    if (allFinished && self.task.fileList.count > 0) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self actionClose];
+        });
+    }
 }
 
 - (void)actionClose {
@@ -98,14 +108,13 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Dequeue reusable cell.
+    // Dequeue a reusable cell.
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) {
        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
        cell.accessoryType = UITableViewCellAccessoryNone;
     }
     
-    // Safely get the file name.
     NSString *fileName = @"";
     @synchronized(self.task.fileList) {
         if (indexPath.row < self.task.fileList.count) {
@@ -114,7 +123,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     }
     cell.textLabel.text = fileName;
     
-    // Remove any previous observer and association.
+    // Remove any previous observer.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, kProgressKey);
     if (oldProgress) {
        @try {
@@ -123,7 +132,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        objc_setAssociatedObject(cell, kProgressKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     
-    // Get the NSProgress for this cell.
     NSProgress *progress = nil;
     @synchronized(self.task.progressList) {
         if (indexPath.row < self.task.progressList.count) {
@@ -135,7 +143,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
        progress.completedUnitCount = 0;
     }
     
-    // Associate progress with the cell.
     objc_setAssociatedObject(cell, kProgressKey, progress, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(progress, kCellKey, cell, OBJC_ASSOCIATION_ASSIGN);
     [progress addObserver:self forKeyPath:@"fractionCompleted"
