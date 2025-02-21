@@ -29,7 +29,8 @@
     return self;
 }
 
-// Updated createDownloadTask: method which reliably obtains the NSProgress and adds it as a child.
+// Updated createDownloadTask: method which obtains the NSProgress from the manager,
+// adds it as a child progress, and also stores it in progressList.
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url size:(NSUInteger)size sha:(NSString *)sha altName:(NSString *)altName toPath:(NSString *)path success:(void(^)(void))success {
     BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
     if (fileExists && [self checkSHA:sha forFile:path altName:altName]) {
@@ -51,7 +52,7 @@
         return [NSURL fileURLWithPath:path];
     } completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
         if (self.progress.cancelled) {
-            // If cancelled, ignore further errors.
+            // If cancelled, ignore errors.
         } else if (error != nil) {
             [self finishDownloadWithError:error file:name];
         } else if (![self checkSHA:sha forFile:path altName:altName]) {
@@ -66,10 +67,12 @@
     }];
     
     if (size && task) {
-        // Directly obtain the NSProgress from the manager and add it as a child.
+        // Directly obtain the NSProgress from the manager.
         childProgress = [self.manager downloadProgressForTask:task];
         [self addChildProgress:childProgress withSize:size];
         [self.fileList addObject:name];
+        // Store the child progress so the UI can reference it.
+        [self.progressList addObject:childProgress];
     }
     
     return task;
@@ -211,6 +214,7 @@
             path = [NSString stringWithFormat:@"%s/assets/objects/%@", getenv("POJAV_GAME_DIR"), pathname];
         }
         
+        // Skip downloading the icon file for macOS.
         if ([name hasSuffix:@"/minecraft.icns"]) {
             [NSFileManager.defaultManager removeItemAtPath:path error:nil];
             continue;
@@ -233,7 +237,7 @@
         [self downloadAssetMetadataWithSuccess:^{
             NSArray *libTasks = [self downloadClientLibraries];
             NSArray *assetTasks = [self downloadClientAssets];
-            // Adjust the fake byte we set initially
+            // Adjust the initial fake byte
             self.progress.totalUnitCount--;
             self.textProgress.totalUnitCount--;
             if (self.progress.totalUnitCount == 0) {
@@ -276,7 +280,7 @@
     self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    // Set initial fake byte to prevent premature completion.
+    // Set an initial fake byte to prevent premature completion.
     self.progress.totalUnitCount = 1;
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
