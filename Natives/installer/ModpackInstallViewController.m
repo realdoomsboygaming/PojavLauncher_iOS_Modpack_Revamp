@@ -9,10 +9,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
+@interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource, UIContextMenuInteractionDelegate>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @property (nonatomic, strong) UIMenu *currentMenu;
-// Prevent repeated searches when the text hasn't changed
+@property (nonatomic, strong) NSMutableDictionary<NSString *, UIImage *> *previewImages;
 @property (nonatomic, copy) NSString *previousSearchText;
 @end
 
@@ -47,14 +47,13 @@ NS_ASSUME_NONNULL_BEGIN
     }
     
     self.modrinth = [ModrinthAPI new];
-    self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
+    self.filters = [@{@@"isModpack": @(YES), @@"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
+    self.previewImages = [NSMutableDictionary dictionary];
     self.previousSearchText = @""; // so the first search always runs
     
     [self updateSearchResults];
 }
-
-#pragma mark - Prompt for CF Key if Missing
 
 - (void)promptForCurseForgeAPIKey {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
@@ -93,8 +92,6 @@ NS_ASSUME_NONNULL_BEGIN
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-#pragma mark - UISegmentedControl Action
-
 - (void)apiSegmentChanged:(UISegmentedControl *)sender {
     if (sender.selectedSegmentIndex == 0) {
         NSString *key = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
@@ -108,8 +105,6 @@ NS_ASSUME_NONNULL_BEGIN
     [self updateSearchResults];
 }
 
-#pragma mark - UISearchResultsUpdating
-
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateSearchResults) object:nil];
     [self performSelector:@selector(updateSearchResults) withObject:nil afterDelay:0.5];
@@ -118,8 +113,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)updateSearchResults {
     [self loadSearchResultsWithPrevList:NO];
 }
-
-#pragma mark - Loading Search Results
 
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *currentSearchText = self.searchController.searchBar.text ?: @"";
@@ -143,8 +136,7 @@ NS_ASSUME_NONNULL_BEGIN
             return;
         }
         [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)
-                                   completion:^(NSMutableArray * _Nullable results, NSError * _Nullable error)
-        {
+                               completion:^(NSMutableArray * _Nullable results, NSError * _Nullable error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
                     self.list = results;
@@ -173,8 +165,6 @@ NS_ASSUME_NONNULL_BEGIN
         });
     }
 }
-
-#pragma mark - TableView DataSource
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.list.count;
@@ -211,8 +201,6 @@ NS_ASSUME_NONNULL_BEGIN
     return cell;
 }
 
-#pragma mark - TableView Delegate
-
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     NSMutableDictionary *item = self.list[indexPath.row];
@@ -243,28 +231,126 @@ NS_ASSUME_NONNULL_BEGIN
     }
 }
 
-#pragma mark - Context Menu (iOS 13+)
-
-- (UIContextMenuConfiguration * _Nullable)tableView:(UITableView *)tableView
-contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView 
+         contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath 
                                     point:(CGPoint)point {
-    return [UIContextMenuConfiguration configurationWithIdentifier:nil
-                                                     previewProvider:nil
-                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
-        return self.currentMenu;
+    NSDictionary *item = self.list[indexPath.row];
+    
+    return [UIContextMenuConfiguration configurationWithIdentifier:item[@"id"]
+                                                     previewProvider:^UIViewController * _Nullable(UILargeTitleDisplayMode largeTitleDisplayMode) {
+        UIViewController *previewVC = [UIViewController new];
+        previewVC.view.backgroundColor = .white;
+        
+        UIImageView *imageView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        imageView.contentMode = .scaleAspectFit;
+        NSString *imageUrl = item[@"imageUrl"];
+        
+        if (imageUrl.length > 0) {
+            UIImage *cachedImage = self.previewImages[imageUrl];
+            if (!cachedImage) {
+                cachedImage = self.fallbackImage;
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    NSURL *url = [NSURL URLWithString:imageUrl];
+                    NSData *data = [NSData dataWithContentsOfURL:url];
+                    if (data) {
+                        UIImage *img = [UIImage imageWithData:data];
+                        if (img) {
+                            [self.previewImages setObject:img forKey:imageUrl];
+                        }
+                    }
+                });
+            }
+            imageView.image = cachedImage;
+        } else {
+            imageView.image = self.fallbackImage;
+        }
+        
+        UILabel *titleLabel = [[UILabel alloc] init];
+        titleLabel.text = item[@"title"];
+        titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleLargeTitle];
+        
+        UILabel *descriptionLabel = [[UILabel alloc] init];
+        descriptionLabel.text = item[@"description"];
+        descriptionLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        descriptionLabel.numberOfLines = 0;
+        
+        [previewVC.view addSubview:imageView];
+        [previewVC.view addSubview:titleLabel];
+        [previewVC.view addSubview:descriptionLabel];
+        
+        imageView.translatesAutoresizingMaskIntoConstraints = NO;
+        titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        descriptionLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        
+        [NSLayoutConstraint activate:@[
+            [imageView.topAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.topAnchor constant:16],
+            [imageView.leadingAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.leadingAnchor constant:16],
+            [imageView.trailingAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+            [imageView.heightAnchor constraintEqualToConstant:200],
+            
+            [titleLabel.topAnchor constraintEqualToAnchor:imageView.bottomAnchor constant:16],
+            [titleLabel.leadingAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.leadingAnchor constant:16],
+            [titleLabel.trailingAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+            
+            [descriptionLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:8],
+            [descriptionLabel.leadingAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.leadingAnchor constant:16],
+            [descriptionLabel.trailingAnchor constraintEqualToAnchor:previewVC.view.safeAreaLayoutGuide.trailingAnchor constant:-16]
+        ]];
+        
+        return previewVC;
+    } handler:^UIMenu * _Nullable(NSArray<UIMenuElement *> *suggestedActions) {
+        UIAction *installAction = [UIAction actionWithTitle:@"Install"
+                                                    image:[UIImage systemImageNamed:@"download"]
+                                                  identifier:nil
+                                                  handler:^(UIAction *action) {
+            [self tableView:tableView didSelectRowAtIndexPath:indexPath];
+        }];
+        
+        UIAction *shareAction = [UIAction actionWithTitle:@"Share"
+                                                 image:[UIImage systemImageNamed:@"square.and.arrow.up"]
+                                               identifier:nil
+                                               handler:^(UIAction *action) {
+            // Implement sharing logic
+        }];
+        
+        UIAction *detailsAction = [UIAction actionWithTitle:@"Show Details"
+                                                   image:[UIImage systemImageNamed:@"info"]
+                                                 identifier:nil
+                                                 handler:^(UIAction *action) {
+            [self tableView:tableView didSelectRowAtIndexPath:indexPath];
+        }];
+        
+        return [UIMenu menuWithTitle:@"" children:@[installAction, shareAction, detailsAction]];
     }];
 }
 
-- (UIContextMenuConfiguration * _Nullable)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-                 configurationForMenuAtLocation:(CGPoint)location {
-    return [UIContextMenuConfiguration configurationWithIdentifier:nil
-                                                     previewProvider:nil
-                                                      actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
-        return self.currentMenu;
-    }];
+- (UITargetedPreview *)tableView:(UITableView *)tableView 
+       previewForHighlightingContextMenuWithConfiguration:(UIContextMenuConfiguration *)configuration {
+    NSIndexPath *indexPath = [tableView indexPathForIdentifier:configuration.identifier];
+    if (!indexPath) return nil;
+    
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell) return nil;
+    
+    UITargetedPreview *preview = [[UITargetedPreview alloc] initWithView:cell
+        parameters:[UIPreviewParameters new]];
+    preview.targetRect = cell.frame;
+    return preview;
 }
 
-#pragma mark - Show Details
+- (UITargetedPreview *)tableView:(UITableView *)tableView 
+       previewForDismissingContextMenuWithConfiguration:(UIContextMenuConfiguration *)configuration {
+    NSIndexPath *indexPath = [tableView indexPathForIdentifier:configuration.identifier];
+    if (!indexPath) return nil;
+    
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    if (!cell) return nil;
+    
+    UITargetedPreview *preview = [[UITargetedPreview alloc] initWithView:cell
+        parameters:[UIPreviewParameters new]];
+    preview.targetRect = cell.frame;
+    return preview;
+}
 
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
@@ -275,8 +361,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     
     NSArray *versionNames = details[@"versionNames"];
     NSArray *mcVersionNames = details[@"mcVersionNames"];
-    if (![versionNames isKindOfClass:[NSArray class]] ||
-        ![mcVersionNames isKindOfClass:[NSArray class]]) {
+    if (![versionNames isKindOfClass:[NSArray class]] || ![mcVersionNames isKindOfClass:[NSArray class]]) {
         return;
     }
     
@@ -288,8 +373,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
         
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
-                                                              handler:^(UIAlertAction * _Nonnull action)
-        {
+                                                              handler:^(UIAlertAction * _Nonnull action) {
             NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
             NSData *imgData = UIImagePNGRepresentation(cell.imageView.image);
             [imgData writeToFile:tmpIconPath atomically:YES];
@@ -325,8 +409,6 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-#pragma mark - UI State Management
-
 - (void)switchToLoadingState {
     UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc]
                                           initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
@@ -355,15 +437,12 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
-#pragma mark - Image Loading
-
 - (void)loadImageForCell:(UITableViewCell *)cell withURL:(NSString *)urlString {
     NSURL *url = [NSURL URLWithString:urlString];
     if (!url) return;
     
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url
-                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error)
-    {
+                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (!error && data) {
             UIImage *img = [UIImage imageWithData:data];
             dispatch_async(dispatch_get_main_queue(), ^{
