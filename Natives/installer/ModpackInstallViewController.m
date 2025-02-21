@@ -12,7 +12,6 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ModpackInstallViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UIImage *fallbackImage;
 @property (nonatomic, strong) UIMenu *currentMenu;
-// Prevent repeated searches when the text hasn't changed
 @property (nonatomic, copy) NSString *previousSearchText;
 @end
 
@@ -25,17 +24,20 @@ NS_ASSUME_NONNULL_BEGIN
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     
+    // Setup search controller
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
+    // Setup API selection segmented control
     self.apiSegmentControl = [[UISegmentedControl alloc] initWithItems:@[@"CurseForge", @"Modrinth"]];
     self.apiSegmentControl.selectedSegmentIndex = 0;
     self.apiSegmentControl.frame = CGRectMake(0, 0, 200, 30);
     [self.apiSegmentControl addTarget:self action:@selector(apiSegmentChanged:) forControlEvents:UIControlEventValueChanged];
     self.navigationItem.titleView = self.apiSegmentControl;
     
+    // Initialize CurseForgeAPI if API key exists; otherwise prompt user
     NSString *storedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (storedKey.length > 0) {
         self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:storedKey];
@@ -49,12 +51,12 @@ NS_ASSUME_NONNULL_BEGIN
     self.modrinth = [ModrinthAPI new];
     self.filters = [@{@"isModpack": @(YES), @"name": @""} mutableCopy];
     self.fallbackImage = [UIImage imageNamed:@"DefaultProfile"];
-    self.previousSearchText = @""; // so the first search always runs
+    self.previousSearchText = @""; // Ensure first search runs
     
     [self updateSearchResults];
 }
 
-#pragma mark - Prompt for CF Key if Missing
+#pragma mark - API Key Prompt
 
 - (void)promptForCurseForgeAPIKey {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"CurseForge API Key"
@@ -65,19 +67,21 @@ NS_ASSUME_NONNULL_BEGIN
         textField.secureTextEntry = NO;
     }];
     
+    __weak typeof(self) weakSelf = self;
     UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
                                                        style:UIAlertActionStyleDefault
                                                      handler:^(UIAlertAction * _Nonnull action) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
         NSString *key = alert.textFields.firstObject.text ?: @"";
         if (key.length > 0) {
             [[NSUserDefaults standardUserDefaults] setObject:key forKey:@"CURSEFORGE_API_KEY"];
             [[NSUserDefaults standardUserDefaults] synchronize];
-            self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
-            self.curseForge.parentViewController = self;
-            [self updateSearchResults];
+            strongSelf.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:key];
+            strongSelf.curseForge.parentViewController = strongSelf;
+            [strongSelf updateSearchResults];
         } else {
-            self.apiSegmentControl.selectedSegmentIndex = 1;
-            [self updateSearchResults];
+            strongSelf.apiSegmentControl.selectedSegmentIndex = 1;
+            [strongSelf updateSearchResults];
         }
     }];
     [alert addAction:okAction];
@@ -85,8 +89,9 @@ NS_ASSUME_NONNULL_BEGIN
     UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
                                                            style:UIAlertActionStyleCancel
                                                          handler:^(UIAlertAction * _Nonnull action) {
-        self.apiSegmentControl.selectedSegmentIndex = 1;
-        [self updateSearchResults];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        strongSelf.apiSegmentControl.selectedSegmentIndex = 1;
+        [strongSelf updateSearchResults];
     }];
     [alert addAction:cancelAction];
     
@@ -124,7 +129,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)loadSearchResultsWithPrevList:(BOOL)prevList {
     NSString *currentSearchText = self.searchController.searchBar.text ?: @"";
     if (!prevList && [self.previousSearchText isEqualToString:currentSearchText]) {
-        return; // no need to search again
+        return;
     }
     self.previousSearchText = currentSearchText;
     self.filters[@"name"] = currentSearchText;
@@ -132,7 +137,7 @@ NS_ASSUME_NONNULL_BEGIN
     [self switchToLoadingState];
     
     if (self.apiSegmentControl.selectedSegmentIndex == 0) {
-        // CurseForge
+        // CurseForge search
         if (!self.curseForge) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self switchToReadyState];
@@ -142,24 +147,25 @@ NS_ASSUME_NONNULL_BEGIN
             });
             return;
         }
+        __weak typeof(self) weakSelf = self;
         [self.curseForge searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)
                                    completion:^(NSMutableArray * _Nullable results, NSError * _Nullable error)
         {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
-                    self.list = results;
-                    [self.tableView reloadData];
+                    strongSelf.list = results;
+                    [strongSelf.tableView reloadData];
                 } else if (error) {
                     showDialog(localize(@"Error", nil), error.localizedDescription);
                 }
-                [self switchToReadyState];
+                [strongSelf switchToReadyState];
             });
         }];
     } else {
-        // Modrinth
+        // Modrinth search on background thread
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters
-                                                     previousPageResult:(prevList ? self.list : nil)];
+            NSMutableArray *results = [self.modrinth searchModWithFilters:self.filters previousPageResult:(prevList ? self.list : nil)];
             NSError *searchError = self.modrinth.lastError;
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
@@ -204,7 +210,6 @@ NS_ASSUME_NONNULL_BEGIN
     BOOL usingCurseForge = (self.apiSegmentControl.selectedSegmentIndex == 0);
     BOOL reachedLastPage = usingCurseForge ? self.curseForge.reachedLastPage : self.modrinth.reachedLastPage;
     if (!reachedLastPage && indexPath.row == self.list.count - 1) {
-        // Trigger next page
         [self loadSearchResultsWithPrevList:YES];
     }
     
@@ -218,14 +223,16 @@ NS_ASSUME_NONNULL_BEGIN
     NSMutableDictionary *item = self.list[indexPath.row];
     
     if (![item[@"versionDetailsLoaded"] boolValue]) {
+        __weak typeof(self) weakSelf = self;
         if (self.apiSegmentControl.selectedSegmentIndex == 0) {
             [self.curseForge loadDetailsOfMod:item completion:^(NSError * _Nullable error) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (error) {
                         showDialog(localize(@"Error", nil), error.localizedDescription);
                     } else {
                         item[@"versionDetailsLoaded"] = @(YES);
-                        [self showDetails:item atIndexPath:indexPath];
+                        [strongSelf showDetails:item atIndexPath:indexPath];
                     }
                 });
             }];
@@ -247,7 +254,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (UIContextMenuConfiguration * _Nullable)tableView:(UITableView *)tableView
 contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
-                                    point:(CGPoint)point {
+                                           point:(CGPoint)point {
     return [UIContextMenuConfiguration configurationWithIdentifier:nil
                                                      previewProvider:nil
                                                       actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
@@ -275,17 +282,15 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     
     NSArray *versionNames = details[@"versionNames"];
     NSArray *mcVersionNames = details[@"mcVersionNames"];
-    if (![versionNames isKindOfClass:[NSArray class]] ||
-        ![mcVersionNames isKindOfClass:[NSArray class]]) {
+    if (![versionNames isKindOfClass:[NSArray class]] || ![mcVersionNames isKindOfClass:[NSArray class]]) {
         return;
     }
     
     [versionNames enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *mcVersion = (i < mcVersionNames.count ? mcVersionNames[i] : @"");
         NSString *fullText = ([name rangeOfString:mcVersion].location != NSNotFound
-                            ? name
-                            : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
-        
+                              ? name
+                              : [NSString stringWithFormat:@"%@ - %@", name, mcVersion]);
         UIAlertAction *versionAction = [UIAlertAction actionWithTitle:fullText
                                                                 style:UIAlertActionStyleDefault
                                                               handler:^(UIAlertAction * _Nonnull action)
@@ -329,7 +334,7 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)switchToLoadingState {
     UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc]
-                                          initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+                                            initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     [indicator startAnimating];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:indicator];
     
@@ -342,9 +347,9 @@ contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
     [indicator stopAnimating];
     
     UIBarButtonItem *closeButton = [[UIBarButtonItem alloc]
-        initWithBarButtonSystemItem:UIBarButtonSystemItemClose
-                             target:self
-                             action:@selector(actionClose)];
+                                    initWithBarButtonSystemItem:UIBarButtonSystemItemClose
+                                    target:self
+                                    action:@selector(actionClose)];
     self.navigationItem.rightBarButtonItem = closeButton;
     
     self.navigationController.modalInPresentation = NO;
