@@ -10,6 +10,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 
 @interface DownloadProgressViewController ()
 @property (nonatomic) NSInteger fileListCount;
+@property (nonatomic, strong) NSTimer *refreshTimer;  // Periodic refresh timer
 @end
 
 @implementation DownloadProgressViewController
@@ -26,24 +27,42 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     [super loadView];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
-    self.tableView.allowsSelection = YES;
-    // We use accessoryType for the checkmark; no custom accessory view.
+    self.tableView.allowsSelection = NO;
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    // Observe overall progress updates.
+    
+    // Observe overall progress updates
     [self.task.textProgress addObserver:self
                              forKeyPath:@"fractionCompleted"
                                 options:(NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew)
                                 context:TotalProgressObserverContext];
+    
+    // Start timer to refresh table view every 0.5 seconds if observer doesn’t trigger
+    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
+                                                         target:self
+                                                       selector:@selector(refreshTableView)
+                                                       userInfo:nil
+                                                        repeats:YES];
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
+    
     @try {
         [self.task.textProgress removeObserver:self forKeyPath:@"fractionCompleted"];
     } @catch (NSException *exception) {}
+    
+    [self.refreshTimer invalidate];  // Stop the timer when the view disappears
+    self.refreshTimer = nil;
+}
+
+// Ensures table refresh happens periodically even if KVO doesn’t trigger
+- (void)refreshTableView {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.tableView reloadData];
+    });
 }
 
 // Remove observers from cells when they go off-screen.
@@ -61,23 +80,27 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
 
+// Observer for progress updates
 - (void)observeValueForKeyPath:(NSString *)keyPath
                       ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if (context == CellProgressObserverContext) {
         NSProgress *progress = object;
         UITableViewCell *cell = objc_getAssociatedObject(progress, kCellKey);
         if (!cell) return;
+
         dispatch_async(dispatch_get_main_queue(), ^{
             cell.detailTextLabel.text = [NSString stringWithFormat:@"%.0f%%", progress.fractionCompleted * 100];
             cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            
+            // Force update row without full reload
+            NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
+            if (indexPath) {
+                [self.tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+            }
         });
     } else if (context == TotalProgressObserverContext) {
         dispatch_async(dispatch_get_main_queue(), ^{
             self.title = [NSString stringWithFormat:@"Downloading: %.0f%%", self.task.textProgress.fractionCompleted * 100];
-            if (self.fileListCount != self.task.fileList.count) {
-                [self.tableView reloadData];
-            }
-            self.fileListCount = self.task.fileList.count;
         });
     } else {
         [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
@@ -91,7 +114,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Dequeue a reusable cell.
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) {
        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
