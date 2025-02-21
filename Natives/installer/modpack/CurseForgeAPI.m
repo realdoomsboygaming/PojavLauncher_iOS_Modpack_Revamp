@@ -238,8 +238,20 @@
             return;
         }
         
-        downloader.progress.totalUnitCount = files.count;
+        // Pre-calculate number of download tasks to report progress accurately.
+        NSUInteger downloadTaskCount = 0;
+        for (NSDictionary *fileEntry in files) {
+            NSNumber *projectID = fileEntry[@"projectID"];
+            NSNumber *fileID = fileEntry[@"fileID"];
+            BOOL required = [fileEntry[@"required"] boolValue];
+            NSString *url = [self getDownloadUrlForProject:[projectID unsignedLongLongValue] fileID:[fileID unsignedLongLongValue]];
+            if (url || !required) {
+                downloadTaskCount++;
+            }
+        }
+        downloader.progress.totalUnitCount = downloadTaskCount;
         
+        // Process each file entry.
         for (NSDictionary *fileEntry in files) {
             NSNumber *projectID = fileEntry[@"projectID"];
             NSNumber *fileID = fileEntry[@"fileID"];
@@ -250,12 +262,18 @@
                 [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for project %@ file %@", projectID, fileID]];
                 return;
             } else if (!url) {
+                // No download required for this optional file.
+                downloader.progress.completedUnitCount++;
                 continue;
             }
             
+            // Use the actual file name if provided, rather than the mod ID.
             NSString *relativePath = fileEntry[@"path"];
             if (!relativePath || relativePath.length == 0) {
-                relativePath = [NSString stringWithFormat:@"%@.jar", fileID];
+                relativePath = fileEntry[@"fileName"];
+                if (!relativePath || relativePath.length == 0) {
+                    relativePath = [NSString stringWithFormat:@"%@.jar", fileID];
+                }
             }
             NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
             
@@ -285,6 +303,7 @@
             [task resume];
         }
         
+        // Process version information and profile creation as before.
         NSDictionary *minecraft = manifestDict[@"minecraft"];
         NSString *vanillaVersion = @"";
         NSString *modLoaderId = @"";
@@ -344,6 +363,7 @@
         }
     });
 }
+
 
 #pragma mark - Helper Methods
 
