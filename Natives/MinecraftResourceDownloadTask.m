@@ -79,7 +79,7 @@
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
-// New helper to add a child progress object.
+// Helper to add a child progress object.
 - (void)addChildProgress:(NSProgress *)childProgress withSize:(NSInteger)size {
     NSUInteger fileSize = size > 0 ? size : 1;
     childProgress.kind = NSProgressKindFile;
@@ -211,7 +211,6 @@
             path = [NSString stringWithFormat:@"%s/assets/objects/%@", getenv("POJAV_GAME_DIR"), pathname];
         }
         
-        // Skip downloading the icon file for macOS.
         if ([name hasSuffix:@"/minecraft.icns"]) {
             [NSFileManager.defaultManager removeItemAtPath:path error:nil];
             continue;
@@ -257,8 +256,8 @@
     NSString *url = modDetail[@"versionUrls"][selectedVersion];
     NSUInteger size = [modDetail[@"versionSizes"][selectedVersion] unsignedLongLongValue];
     NSString *sha = modDetail[@"versionHashes"][selectedVersion];
-    NSString *name = [[modDetail[@"title"] lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    name = [name stringByReplacingOccurrencesOfString:@" " withString:@"_"];
+    NSString *name = [[[modDetail[@"title"] lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
+                      stringByReplacingOccurrencesOfString:@" " withString:@"_"];
     NSString *packagePath = [NSTemporaryDirectory() stringByAppendingFormat:@"/%@.zip", name];
     
     NSURLSessionDownloadTask *task = [self createDownloadTask:url size:size sha:sha altName:nil toPath:packagePath success:^{
@@ -271,7 +270,6 @@
 #pragma mark - Utilities
 
 - (void)prepareForDownload {
-    // Create a fake progress to update completedUnitCount properly.
     self.textProgress = [NSProgress new];
     self.textProgress.kind = NSProgressKindFile;
     self.textProgress.fileOperationKind = NSProgressFileOperationKindDownloading;
