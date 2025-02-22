@@ -34,7 +34,6 @@
 }
 
 #pragma mark - Overridden GET Endpoint
-// Uses a dispatch semaphore for synchronous network calls on background threads.
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
     __block id result = nil;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -59,7 +58,6 @@
              self.lastError = error;
              dispatch_semaphore_signal(semaphore);
          }];
-    
     dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
     return result;
 }
@@ -211,46 +209,53 @@
     }
 }
 
-#pragma mark - Asynchronous Manifest Extraction
+#pragma mark - Asynchronous Manifest Extraction (Disk-Based)
 
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error = nil;
         UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
         if (!archive) {
-            if (completion) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    completion(nil, error);
-                });
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
             return;
         }
         
-        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
+        // Extract manifest.json directly to disk instead of into memory.
+        NSString *tempDir = NSTemporaryDirectory();
+        NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
+        BOOL success = [archive extractFile:@"manifest.json" toPath:tempManifestPath error:&error];
+        if (!success) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
+            return;
+        }
+        
+        // Now read the file from disk.
+        NSData *manifestData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:&error];
         if (!manifestData) {
-            if (completion) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    completion(nil, error);
-                });
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
             return;
         }
         
         NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+        // Clean up the temporary file.
+        [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
+        
         if (!manifestDict) {
-            if (completion) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    completion(nil, error);
-                });
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
             return;
         }
         
-        if (completion) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(manifestDict, nil);
-            });
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(manifestDict, nil);
+        });
     });
 }
 
