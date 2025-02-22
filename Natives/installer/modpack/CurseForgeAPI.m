@@ -107,8 +107,8 @@
                         attemptBlock();
                     });
                 } else {
-                    // Fallback branch: build a direct API link, optionally append the API key,
-                    // then also try building a media.forgecdn.net link from the mod's file metadata.
+                    // Fallback branch:
+                    // 1) Build a direct API link, optionally append the API key
                     NSString *fallbackUrl = [NSString stringWithFormat:
                         @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download",
                         projectID, fileID];
@@ -117,28 +117,43 @@
                         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", strongSelf.apiKey];
                     }
                     
+                    // 2) Attempt to build a media.forgecdn.net link from the mod's file metadata
                     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
                     [strongSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
-                        if (fallbackResponse && fallbackResponse[@"data"] &&
-                            ![fallbackResponse[@"data"] isKindOfClass:[NSNull class]])
-                        {
-                            NSDictionary *modData = fallbackResponse[@"data"];
+                        // Safety checks: fallbackResponse should be an NSDictionary, and fallbackResponse[@"data"] too
+                        NSDictionary *responseDict = nil;
+                        if ([fallbackResponse isKindOfClass:[NSDictionary class]]) {
+                            responseDict = (NSDictionary *)fallbackResponse;
+                        }
+                        
+                        if (!responseDict) {
+                            // If fallbackResponse isn't a dictionary, we can't proceed
+                            if (completion) completion(fallbackUrl, nil);
+                            return;
+                        }
+                        
+                        id dataObj = responseDict[@"data"];
+                        if ([dataObj isKindOfClass:[NSDictionary class]]) {
+                            NSDictionary *modData = (NSDictionary *)dataObj;
                             NSNumber *idNumber = modData[@"id"];
                             NSString *fileName = modData[@"fileName"];
+                            
                             if (idNumber && fileName && fileName.length > 0) {
                                 unsigned long long idValue = [idNumber unsignedLongLongValue];
+                                // Build mediaLink
                                 NSString *mediaLink = [NSString stringWithFormat:
                                     @"https://media.forgecdn.net/files/%llu/%llu/%@",
                                     idValue / 1000, idValue % 1000, fileName];
+                                
                                 if (mediaLink && mediaLink.length > 0) {
-                                    // Return the mediaLink exactly as provided.
+                                    // Return the mediaLink exactly as provided
                                     if (completion) completion(mediaLink, nil);
                                     return;
                                 }
                             }
                         }
                         
-                        // If all else fails, return the fallback link exactly as is.
+                        // If all else fails, return the fallback link exactly as is
                         if (completion) completion(fallbackUrl, nil);
                     }];
                 }
@@ -200,7 +215,7 @@
         NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData
                                                                      options:0
                                                                        error:&error];
-        // Clean up temporary file.
+        // Clean up the temporary file.
         [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
         
         if (!manifestDict) {
