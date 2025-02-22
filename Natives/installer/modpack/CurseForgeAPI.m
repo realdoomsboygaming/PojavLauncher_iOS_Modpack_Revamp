@@ -406,8 +406,8 @@
                 
                 // When all file URL retrieval tasks are complete, process overrides and dependencies.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    __autoreleasing NSError *archiveError = nil;
-                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:(NSError * __autoreleasing *)&archiveError];
+                    NSError *archiveError = nil;
+                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
                     if (!archive2) {
                         dispatch_async(dispatch_get_main_queue(), ^{
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", archiveError.localizedDescription]];
