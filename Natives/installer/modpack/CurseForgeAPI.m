@@ -62,15 +62,19 @@
     __block int attempt = 0;
     __weak typeof(self) weakSelf = self;
     void (^attemptBlock)(void) = ^{
-        [weakSelf getEndpoint:endpoint params:nil completion:^(id response, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            if (completion) completion(nil, nil);
+            return;
+        }
+        [strongSelf getEndpoint:endpoint params:nil completion:^(id response, NSError *error) {
             if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
                 NSString *url = [NSString stringWithFormat:@"%@", response[@"data"]];
                 if (completion) completion(url, nil);
             } else {
                 attempt++;
                 if (attempt < 2) {
-                    __strong typeof(weakSelf) strongSelf = weakSelf;
-                    if (!strongSelf) return;
+                    // Delay then try again on the _networkQueue
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), strongSelf->_networkQueue, ^{
                         attemptBlock();
                     });
@@ -78,7 +82,8 @@
                     // Fallback: use direct API link then try to build a media.forgecdn.net URL.
                     NSString *fallbackUrl = [NSString stringWithFormat:@"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
                     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
-                    [weakSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
+                    [strongSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
+                        __strong typeof(weakSelf) innerSelf = weakSelf;
                         if (fallbackResponse && fallbackResponse[@"data"] && ![fallbackResponse[@"data"] isKindOfClass:[NSNull class]]) {
                             NSDictionary *modData = fallbackResponse[@"data"];
                             NSNumber *idNumber = modData[@"id"];
@@ -86,6 +91,7 @@
                                 unsigned long long idValue = [idNumber unsignedLongLongValue];
                                 NSString *fileName = modData[@"fileName"];
                                 if (fileName) {
+                                    // Build media URL safely.
                                     NSString *mediaLink = [NSString stringWithFormat:@"https://media.forgecdn.net/files/%llu/%llu/%@", idValue / 1000, idValue % 1000, fileName];
                                     if (mediaLink) {
                                         if (completion) completion(mediaLink, nil);
@@ -337,7 +343,7 @@
                     }
                 }
                 
-                // For progress, we set the total unit count to the number of deduplicated files.
+                // Set progress total unit count to the number of deduplicated files.
                 downloader.progress.totalUnitCount = files.count;
                 NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 
