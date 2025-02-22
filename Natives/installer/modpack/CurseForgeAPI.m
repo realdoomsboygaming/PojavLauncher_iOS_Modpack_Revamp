@@ -222,19 +222,8 @@
             return;
         }
         
-        // Extract manifest.json directly to disk instead of into memory.
-        NSString *tempDir = NSTemporaryDirectory();
-        NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
-        BOOL success = [archive extractFile:@"manifest.json" toPath:tempManifestPath error:&error];
-        if (!success) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, error);
-            });
-            return;
-        }
-        
-        // Now read the file from disk.
-        NSData *manifestData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:&error];
+        // Extract manifest.json as data
+        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
         if (!manifestData) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(nil, error);
@@ -242,7 +231,30 @@
             return;
         }
         
-        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+        // Write the manifest data immediately to disk
+        NSString *tempDir = NSTemporaryDirectory();
+        NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
+        BOOL writeSuccess = [manifestData writeToFile:tempManifestPath atomically:YES];
+        if (!writeSuccess) {
+            NSError *writeError = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
+                                                      code:-1
+                                                  userInfo:@{NSLocalizedDescriptionKey: @"Failed to write manifest to disk"}];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, writeError);
+            });
+            return;
+        }
+        
+        // Read the file from disk
+        NSData *diskData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:&error];
+        if (!diskData) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, error);
+            });
+            return;
+        }
+        
+        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:&error];
         // Clean up the temporary file.
         [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
         
