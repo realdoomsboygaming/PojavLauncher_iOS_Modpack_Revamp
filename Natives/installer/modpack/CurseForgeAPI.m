@@ -19,7 +19,7 @@
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest;
 - (NSString *)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID;
 
-// New asynchronous manifest extraction with caching
+// New asynchronous manifest extraction with caching and memory mapping.
 + (NSCache<NSString *, NSDictionary *> *)manifestCache;
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath
                              completion:(void(^)(NSDictionary *manifestDict, NSError *error))completion;
@@ -215,14 +215,14 @@
     }
 }
 
-#pragma mark - Asynchronous Manifest Extraction with Caching
+#pragma mark - Asynchronous Manifest Extraction with Caching (Optimized)
 
 + (NSCache<NSString *, NSDictionary *> *)manifestCache {
     static NSCache<NSString *, NSDictionary *> *cache = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         cache = [[NSCache alloc] init];
-        cache.countLimit = 10; // limit to 10 manifests; adjust as needed
+        cache.countLimit = 10; // adjust as needed
     });
     return cache;
 }
@@ -245,27 +245,39 @@
         return;
     }
     
-    // Extract the manifest asynchronously.
+    // Generate a unique temporary file path for the manifest.
+    NSString *tempManifestPath = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"manifest_%@", [[NSUUID UUID] UUIDString]]];
+    
+    // Extract the manifest file to disk asynchronously.
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSError *error = nil;
-        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
-        if (error || !manifestData) {
+        NSError *extractError = nil;
+        BOOL success = [archive extractFile:@"manifest.json" toPath:tempManifestPath error:&extractError];
+        if (!success || extractError) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, error);
+                completion(nil, extractError);
             });
             return;
         }
-        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
-        if (error || !manifestDict) {
+        
+        // Read the manifest file using memory-mapped reading.
+        NSError *readError = nil;
+        NSData *manifestData = [NSData dataWithContentsOfFile:tempManifestPath options:NSDataReadingMappedIfSafe error:&readError];
+        // Remove the temporary file.
+        [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
+        if (!manifestData || readError) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, error);
+                completion(nil, readError);
             });
             return;
         }
-        // Cache the parsed manifest.
-        [[CurseForgeAPI manifestCache] setObject:manifestDict forKey:packagePath];
+        
+        NSError *jsonError = nil;
+        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&jsonError];
+        if (manifestDict && !jsonError) {
+            [[CurseForgeAPI manifestCache] setObject:manifestDict forKey:packagePath];
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
-            completion(manifestDict, nil);
+            completion(manifestDict, jsonError);
         });
     });
 }
@@ -275,6 +287,7 @@
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
+    // Use asynchronous manifest extraction.
     [self asyncExtractManifestFromPackage:packagePath completion:^(NSDictionary *manifestDict, NSError *error) {
         if (error || !manifestDict) {
             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract manifest.json: %@", error.localizedDescription]];
