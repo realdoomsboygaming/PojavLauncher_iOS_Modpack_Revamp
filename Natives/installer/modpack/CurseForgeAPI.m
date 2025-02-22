@@ -12,9 +12,12 @@
 #define CURSEFORGE_PAGINATION_SIZE 50
 
 @interface CurseForgeAPI ()
-@property (nonatomic, copy) NSString *apiKey;
-- (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest; // Private helper to verify manifest
-- (NSString *)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID; // Fallback URL helper
+// Redeclare apiKey as readwrite (header declares it readonly)
+@property (nonatomic, strong) NSString *apiKey;
+
+// Private helper methods
+- (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest;
+- (NSString *)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID;
 @end
 
 @implementation CurseForgeAPI
@@ -22,6 +25,7 @@
 #pragma mark - Initialization
 
 - (instancetype)initWithAPIKey:(NSString *)apiKey {
+    // Assumes CurseForgeAPI is a subclass of ModpackAPI (which provides -initWithURL:)
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
     if (self) {
         self.apiKey = apiKey;
@@ -30,7 +34,7 @@
 }
 
 #pragma mark - Overridden GET Endpoint
-// Uses a dispatch semaphore for synchronous network calls on background threads.
+
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
     __block id result = nil;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
@@ -208,8 +212,10 @@
 
 #pragma mark - Download Tasks from Package
 
-// Modified to report progress the same way as ModrinthAPI by running synchronously.
-- (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
+// This method deduplicates file entries (based on projectID and fileID) and submits download tasks.
+- (void)downloader:(MinecraftResourceDownloadTask *)downloader
+submitDownloadTasksFromPackage:(NSString *)packagePath
+            toPath:(NSString *)destPath {
     NSError *error = nil;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
     if (error || !archive) {
@@ -234,7 +240,7 @@
         return;
     }
     
-    // Deduplicate the file entries based on projectID and fileID.
+    // Deduplicate file entries using projectID and fileID.
     NSArray *allFiles = manifestDict[@"files"];
     NSMutableArray *files = [NSMutableArray new];
     NSMutableSet *uniqueKeys = [NSMutableSet new];
@@ -248,7 +254,7 @@
     
     NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
     
-    // Pre-calculate total download tasks from deduplicated files.
+    // Calculate total download tasks from deduplicated files.
     NSUInteger totalDownloads = 0;
     for (NSDictionary *fileEntry in files) {
         NSNumber *projectID = fileEntry[@"projectID"];
@@ -261,7 +267,7 @@
     }
     downloader.progress.totalUnitCount = totalDownloads;
     
-    // Process each deduplicated file entry.
+    // Create download tasks for each deduplicated file entry.
     for (NSDictionary *fileEntry in files) {
         NSNumber *projectID = fileEntry[@"projectID"];
         NSNumber *fileID = fileEntry[@"fileID"];
@@ -280,7 +286,7 @@
             continue;
         }
         
-        // Determine the actual file name.
+        // Determine the final file name.
         NSString *relativePath = fileEntry[@"path"];
         if (!relativePath || relativePath.length == 0) {
             relativePath = fileEntry[@"fileName"];
@@ -294,7 +300,7 @@
         }
         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
         
-        // Use fileLength from the manifest if available; default to 1.
+        // Use fileLength if available; default to 1.
         NSUInteger fileSize = 1;
         if (fileEntry[@"fileLength"] && [fileEntry[@"fileLength"] respondsToSelector:@selector(unsignedIntegerValue)]) {
             fileSize = [fileEntry[@"fileLength"] unsignedIntegerValue];
@@ -312,6 +318,7 @@
         }
     }
     
+    // Extract overrides.
     [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", error.localizedDescription]];
@@ -322,12 +329,13 @@
     
     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
     if (depInfo[@"json"]) {
-        NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
+        NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json",
+                              getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
         [task resume];
     }
     
-    // Process version and profile information...
+    // Process version and profile information.
     NSDictionary *minecraft = manifestDict[@"minecraft"];
     NSString *vanillaVersion = @"";
     NSString *modLoaderId = @"";
@@ -387,24 +395,12 @@
     }
 }
 
-#pragma mark - Helper Methods
-
-- (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest {
-    if (![manifest[@"manifestType"] isEqualToString:@"minecraftModpack"]) return NO;
-    if ([manifest[@"manifestVersion"] integerValue] != 1) return NO;
-    if (!manifest[@"minecraft"]) return NO;
-    NSDictionary *minecraft = manifest[@"minecraft"];
-    if (!minecraft[@"version"]) return NO;
-    if (!minecraft[@"modLoaders"]) return NO;
-    NSArray *modLoaders = minecraft[@"modLoaders"];
-    if (![modLoaders isKindOfClass:[NSArray class]] || modLoaders.count < 1) return NO;
-    return YES;
-}
+#pragma mark - Additional Fallback Link Logic
 
 - (NSString *)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID {
+    // 1) Attempt the official endpoint with two attempts.
     NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
     NSDictionary *response = nil;
-    // Try the primary endpoint with one retry.
     for (int attempt = 0; attempt < 2; attempt++) {
         response = [self getEndpoint:endpoint params:nil];
         if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
@@ -413,7 +409,12 @@
         [NSThread sleepForTimeInterval:0.5];
     }
     
-    // Fallback: build URL using file metadata.
+    // 2) Fallback: direct CurseForge API link.
+    NSString *directDownloadUrl = [NSString stringWithFormat:
+        @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download",
+        projectID, fileID];
+    
+    // 3) Next fallback: attempt to build a media.forgecdn.net link using file metadata.
     endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     NSDictionary *fallbackResponse = [self getEndpoint:endpoint params:nil];
     if (fallbackResponse && fallbackResponse[@"data"] && ![fallbackResponse[@"data"] isKindOfClass:[NSNull class]]) {
@@ -423,11 +424,18 @@
             unsigned long long idValue = [idNumber unsignedLongLongValue];
             NSString *fileName = modData[@"fileName"];
             if (fileName) {
-                return [NSString stringWithFormat:@"https://edge.forgecdn.net/files/%llu/%llu/%@", idValue / 1000, idValue % 1000, fileName];
+                NSString *mediaLink = [NSString stringWithFormat:
+                    @"https://media.forgecdn.net/files/%llu/%llu/%@",
+                    idValue / 1000, idValue % 1000, fileName];
+                if (mediaLink) {
+                    return mediaLink;
+                }
             }
         }
     }
-    return nil;
+    
+    // 4) If all else fails, return the direct API fallback link.
+    return directDownloadUrl;
 }
 
 @end
