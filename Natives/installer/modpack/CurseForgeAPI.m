@@ -275,7 +275,6 @@
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
-    // Instead of extracting the manifest synchronously, use the asynchronous helper.
     [self asyncExtractManifestFromPackage:packagePath completion:^(NSDictionary *manifestDict, NSError *error) {
         if (error || !manifestDict) {
             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract manifest.json: %@", error.localizedDescription]];
@@ -366,7 +365,13 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             }
         }
         
-        // Extract the "overrides" directory.
+        // Re-open the archive to extract the overrides.
+        NSError *archiveError = nil;
+        UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
+        if (!archive) {
+            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", archiveError.localizedDescription]];
+            return;
+        }
         NSError *extractError = nil;
         [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&extractError];
         if (extractError) {
