@@ -313,13 +313,16 @@
             UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
             if (!archive) {
                 dispatch_async(dispatch_get_main_queue(), ^{
+                    NSLog(@"Archive initialization failed: %@", error.localizedDescription);
                     [downloader finishDownloadWithErrorString:error.localizedDescription];
                 });
                 return;
             }
+            
             [weakSelf asyncExtractManifestFromPackage:packagePath completion:^(NSDictionary *manifestDict, NSError *error) {
                 if (error || !manifestDict) {
                     dispatch_async(dispatch_get_main_queue(), ^{
+                        NSLog(@"Manifest extraction failed: %@", error.localizedDescription);
                         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract manifest.json: %@", error.localizedDescription]];
                     });
                     return;
@@ -327,6 +330,7 @@
                 
                 if (![weakSelf verifyManifestFromDictionary:manifestDict]) {
                     dispatch_async(dispatch_get_main_queue(), ^{
+                        NSLog(@"Manifest verification failed");
                         [downloader finishDownloadWithErrorString:@"Manifest verification failed"];
                     });
                     return;
@@ -344,7 +348,9 @@
                 }
                 
                 // Set progress total unit count to the number of deduplicated files.
-                downloader.progress.totalUnitCount = files.count;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    downloader.progress.totalUnitCount = files.count;
+                });
                 NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 
                 // Process each file asynchronously.
@@ -362,6 +368,7 @@
                                 if (!modName || modName.length == 0) {
                                     modName = [NSString stringWithFormat:@"Project %@ File %@", projectID, fileID];
                                 }
+                                NSLog(@"Failed to obtain URL for %@ in modpack %@", modName, modpackName);
                                 [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for modpack '%@' and mod '%@'", modpackName, modName]];
                             });
                             dispatch_group_leave(group);
@@ -393,18 +400,23 @@
                             if (fileSize == 0) { fileSize = 1; }
                         }
                         
-                        NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:fileSize sha:nil altName:nil toPath:destinationPath];
-                        if (task) {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                [downloader.fileList addObject:relativePath];
-                                [task resume];
-                            });
-                        } else {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                if (!downloader.progress.cancelled) {
-                                    downloader.progress.completedUnitCount++;
-                                }
-                            });
+                        @try {
+                            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:fileSize sha:nil altName:nil toPath:destinationPath];
+                            if (task) {
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    [downloader.fileList addObject:relativePath];
+                                    NSLog(@"Starting download for %@", relativePath);
+                                    [task resume];
+                                });
+                            } else {
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    if (!downloader.progress.cancelled) {
+                                        downloader.progress.completedUnitCount++;
+                                    }
+                                });
+                            }
+                        } @catch (NSException *exception) {
+                            NSLog(@"Exception while creating or resuming download task for %@: %@", relativePath, exception);
                         }
                         dispatch_group_leave(group);
                     }];
@@ -416,6 +428,7 @@
                     UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
                     if (!archive2) {
                         dispatch_async(dispatch_get_main_queue(), ^{
+                            NSLog(@"Failed to reopen archive: %@", archiveError.localizedDescription);
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", archiveError.localizedDescription]];
                         });
                         return;
@@ -425,6 +438,7 @@
                     [ModpackUtils archive:archive2 extractDirectory:@"overrides" toPath:destPath error:&extractError];
                     if (extractError) {
                         dispatch_async(dispatch_get_main_queue(), ^{
+                            NSLog(@"Failed to extract overrides: %@", extractError.localizedDescription);
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", extractError.localizedDescription]];
                         });
                         return;
@@ -435,8 +449,13 @@
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
                         NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
-                        NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
-                        [task resume];
+                        NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
+                        if (depTask) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                NSLog(@"Starting dependency download");
+                                [depTask resume];
+                            });
+                        }
                     }
                     
                     NSDictionary *minecraft = manifestDict[@"minecraft"];
@@ -494,6 +513,7 @@
                             @"icon": @""
                         };
                         dispatch_async(dispatch_get_main_queue(), ^{
+                            NSLog(@"Setting profile: %@", profileName);
                             PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
                             PLProfiles.current.selectedProfileName = profileName;
                         });
@@ -503,6 +523,7 @@
         }
     });
 }
+
 
 #pragma mark - Helper Methods
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest {
