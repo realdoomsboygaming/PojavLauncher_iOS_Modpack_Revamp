@@ -1,10 +1,3 @@
-//
-//  CurseForgeAPI.m
-//  PojavLauncher
-//
-//  Created by Example on 2/28/2023.
-//
-
 #import "CurseForgeAPI.h"
 #import "config.h"
 #import "MinecraftResourceDownloadTask.h"
