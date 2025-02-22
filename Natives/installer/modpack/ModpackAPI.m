@@ -17,12 +17,17 @@
     [self doesNotRecognizeSelector:_cmd];
 }
 
-- (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)prevResult {
+- (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters
+                      previousPageResult:(NSMutableArray *)prevResult
+{
     [self doesNotRecognizeSelector:_cmd];
     return nil;
 }
 
-- (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
+- (void)downloader:(MinecraftResourceDownloadTask *)downloader
+ submitDownloadTasksFromPackage:(NSString *)packagePath
+            toPath:(NSString *)destPath
+{
     [self doesNotRecognizeSelector:_cmd];
 }
 
@@ -35,7 +40,8 @@
          success:^(NSURLSessionTask *task, id obj) {
              result = obj;
              dispatch_semaphore_signal(semaphore);
-         } failure:^(NSURLSessionTask *operation, NSError *error) {
+         }
+         failure:^(NSURLSessionTask *operation, NSError *error) {
              self.lastError = error;
              dispatch_semaphore_signal(semaphore);
          }];
