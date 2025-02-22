@@ -35,6 +35,7 @@
 }
 
 #pragma mark - Asynchronous GET Endpoint
+
 - (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id result, NSError *error))completion {
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
@@ -57,6 +58,7 @@
 }
 
 #pragma mark - Asynchronous Download URL Generation
+
 - (void)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
     NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
     __block int attempt = 0;
@@ -70,38 +72,20 @@
         [strongSelf getEndpoint:endpoint params:nil completion:^(id response, NSError *error) {
             if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
                 NSString *url = [NSString stringWithFormat:@"%@", response[@"data"]];
-                if (completion) completion(url, nil);
+                // Percent-encode the URL before returning it.
+                NSString *encodedUrl = [url stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+                if (completion) completion(encodedUrl, nil);
             } else {
                 attempt++;
                 if (attempt < 2) {
-                    // Delay then try again on the _networkQueue
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), strongSelf->_networkQueue, ^{
                         attemptBlock();
                     });
                 } else {
-                    // Fallback: use direct API link then try to build a media.forgecdn.net URL.
+                    // After two attempts, simply return a fallback direct API URL.
                     NSString *fallbackUrl = [NSString stringWithFormat:@"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
-                    NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
-                    [strongSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
-                        __strong typeof(weakSelf) innerSelf = weakSelf;
-                        if (fallbackResponse && fallbackResponse[@"data"] && ![fallbackResponse[@"data"] isKindOfClass:[NSNull class]]) {
-                            NSDictionary *modData = fallbackResponse[@"data"];
-                            NSNumber *idNumber = modData[@"id"];
-                            if (idNumber) {
-                                unsigned long long idValue = [idNumber unsignedLongLongValue];
-                                NSString *fileName = modData[@"fileName"];
-                                if (fileName) {
-                                    // Build media URL safely.
-                                    NSString *mediaLink = [NSString stringWithFormat:@"https://media.forgecdn.net/files/%llu/%llu/%@", idValue / 1000, idValue % 1000, fileName];
-                                    if (mediaLink) {
-                                        if (completion) completion(mediaLink, nil);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        if (completion) completion(fallbackUrl, nil);
-                    }];
+                    NSString *encodedFallback = [fallbackUrl stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+                    if (completion) completion(encodedFallback, nil);
                 }
             }
         }];
@@ -110,6 +94,7 @@
 }
 
 #pragma mark - Asynchronous Manifest Extraction (Disk-Based)
+
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error = nil;
@@ -163,6 +148,7 @@
 }
 
 #pragma mark - Asynchronous API Methods
+
 - (void)searchModWithFilters:(NSDictionary *)searchFilters
          previousPageResult:(NSMutableArray *)prevResult
                  completion:(void (^ _Nonnull)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion {
@@ -305,6 +291,7 @@
 }
 
 #pragma mark - New Downloader Function (Asynchronous)
+
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -361,7 +348,9 @@
                     NSNumber *fileID = fileEntry[@"fileID"];
                     BOOL required = [fileEntry[@"required"] boolValue];
                     
-                    [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue] fileID:[fileID unsignedLongLongValue] completion:^(NSString *url, NSError *error) {
+                    [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
+                                                 fileID:[fileID unsignedLongLongValue]
+                                             completion:^(NSString *url, NSError *error) {
                         if (!url && required) {
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 NSString *modName = fileEntry[@"fileName"];
@@ -524,8 +513,8 @@
     });
 }
 
-
 #pragma mark - Helper Methods
+
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest {
     if (![manifest[@"manifestType"] isEqualToString:@"minecraftModpack"]) return NO;
     if ([manifest[@"manifestVersion"] integerValue] != 1) return NO;
