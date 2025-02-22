@@ -74,7 +74,8 @@
 - (void)getDownloadUrlForProject:(unsigned long long)projectID
                           fileID:(unsigned long long)fileID
                       completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
-    NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
+    NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url",
+                          projectID, fileID];
     __block int attempt = 0;
     __weak typeof(self) weakSelf = self;
     
@@ -103,17 +104,19 @@
                     });
                 } else {
                     // Fallback branch:
-                    // 1) Build a direct API link (optionally appending the API key)
+                    // Build a direct API link (optionally with API key)...
                     NSString *fallbackUrl = [NSString stringWithFormat:
                         @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download",
                         projectID, fileID];
                     if (strongSelf.apiKey && strongSelf.apiKey.length > 0) {
                         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", strongSelf.apiKey];
                     }
-                    // 2) Attempt to build a media.forgecdn.net link from file metadata.
+                    // ...and then attempt to build a media link.
                     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
                     [strongSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
-                        // Ensure fallbackResponse is an NSDictionary.
+                        // Log the fallbackResponse to see its structure.
+                        NSLog(@"Fallback response: %@", fallbackResponse);
+                        
                         if ([fallbackResponse isKindOfClass:[NSDictionary class]]) {
                             NSDictionary *responseDict = (NSDictionary *)fallbackResponse;
                             id dataObj = responseDict[@"data"];
@@ -138,6 +141,7 @@
                                 }
                             }
                         }
+                        // If we couldn't build a media link, use the fallback URL.
                         if (completion) completion(fallbackUrl, nil);
                     }];
                 }
@@ -189,7 +193,9 @@
             });
             return;
         }
-        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:&error];
+        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData
+                                                                     options:0
+                                                                       error:&error];
         // Clean up temporary file.
         [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
         if (!manifestDict) {
@@ -457,7 +463,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
                         
                         NSUInteger fileSize = 1;
-                        if (fileEntry[@"fileLength"] && [fileEntry[@"fileLength"] respondsToSelector:@selector(unsignedIntegerValue)]) {
+                        if (fileEntry[@"fileLength"] &&
+                            [fileEntry[@"fileLength"] respondsToSelector:@selector(unsignedIntegerValue)]) {
                             fileSize = [fileEntry[@"fileLength"] unsignedIntegerValue];
                             if (fileSize == 0) { fileSize = 1; }
                         }
@@ -494,7 +501,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
                                       ^{
                     NSError *archiveError = nil;
-                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
+                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath
+                                                                     error:&archiveError];
                     if (!archive2) {
                         dispatch_async(dispatch_get_main_queue(), ^{
                             NSLog(@"Failed to reopen archive: %@", archiveError.localizedDescription);
