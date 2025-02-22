@@ -66,13 +66,16 @@
     void (^attemptBlock)(void) = ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
-            if (completion) completion(nil, nil);
+            if (completion) {
+                NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Internal error"}];
+                completion(nil, err);
+            }
             return;
         }
         [strongSelf getEndpoint:endpoint params:nil completion:^(id response, NSError *error) {
             if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
                 NSString *url = [NSString stringWithFormat:@"%@", response[@"data"]];
-                // Percent-encode the URL before returning it.
+                // Percent-encode the URL to avoid unsupported characters.
                 NSString *encodedUrl = [url stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
                 if (completion) completion(encodedUrl, nil);
             } else {
@@ -82,10 +85,34 @@
                         attemptBlock();
                     });
                 } else {
-                    // After two attempts, simply return a fallback direct API URL.
+                    // Fallback branch:
+                    // Build a fallback direct API URL.
                     NSString *fallbackUrl = [NSString stringWithFormat:@"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
-                    NSString *encodedFallback = [fallbackUrl stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-                    if (completion) completion(encodedFallback, nil);
+                    // If an API key is available, append it as a query parameter.
+                    if (strongSelf.apiKey && strongSelf.apiKey.length > 0) {
+                        fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", strongSelf.apiKey];
+                    }
+                    // Try to obtain media link from file metadata.
+                    NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
+                    [strongSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
+                        if (fallbackResponse && fallbackResponse[@"data"] && ![fallbackResponse[@"data"] isKindOfClass:[NSNull class]]) {
+                            NSDictionary *modData = fallbackResponse[@"data"];
+                            NSNumber *idNumber = modData[@"id"];
+                            NSString *fileName = modData[@"fileName"];
+                            if (idNumber && fileName && fileName.length > 0) {
+                                unsigned long long idValue = [idNumber unsignedLongLongValue];
+                                NSString *mediaLink = [NSString stringWithFormat:@"https://media.forgecdn.net/files/%llu/%llu/%@", idValue / 1000, idValue % 1000, fileName];
+                                if (mediaLink && mediaLink.length > 0) {
+                                    NSString *encodedMediaLink = [mediaLink stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+                                    if (completion) completion(encodedMediaLink, nil);
+                                    return;
+                                }
+                            }
+                        }
+                        // Use the fallback URL (percent‑encoded).
+                        NSString *encodedFallback = [fallbackUrl stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+                        if (completion) completion(encodedFallback, nil);
+                    }];
                 }
             }
         }];
