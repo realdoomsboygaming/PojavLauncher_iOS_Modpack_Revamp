@@ -69,7 +69,9 @@
             } else {
                 attempt++;
                 if (attempt < 2) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), weakSelf->_networkQueue, ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) return;
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), strongSelf->_networkQueue, ^{
                         attemptBlock();
                     });
                 } else {
@@ -299,7 +301,6 @@
 #pragma mark - New Downloader Function (Asynchronous)
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     __weak typeof(self) weakSelf = self;
-    // Process on a background queue.
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @autoreleasepool {
             NSError *error = nil;
@@ -336,7 +337,7 @@
                     }
                 }
                 
-                // For progress, we use the count of deduplicated files.
+                // For progress, we set the total unit count to the number of deduplicated files.
                 downloader.progress.totalUnitCount = files.count;
                 NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 
@@ -403,12 +404,13 @@
                     }];
                 }
                 
-                // When all file URL retrieval tasks are done, process overrides and dependencies.
+                // When all file URL retrieval tasks are complete, process overrides and dependencies.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&error];
+                    __autoreleasing NSError *archiveError = nil;
+                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:(NSError * __autoreleasing *)&archiveError];
                     if (!archive2) {
                         dispatch_async(dispatch_get_main_queue(), ^{
-                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", error.localizedDescription]];
+                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", archiveError.localizedDescription]];
                         });
                         return;
                     }
