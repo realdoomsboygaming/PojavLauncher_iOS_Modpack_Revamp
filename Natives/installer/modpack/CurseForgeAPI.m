@@ -212,7 +212,6 @@
 
 #pragma mark - Download Tasks from Package
 
-// This method deduplicates file entries (based on projectID and fileID) and submits download tasks.
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
@@ -436,6 +435,20 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     
     // 4) If all else fails, return the direct API fallback link.
     return directDownloadUrl;
+}
+
+#pragma mark - Implementation for verifyManifestFromDictionary:
+
+- (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest {
+    if (![manifest[@"manifestType"] isEqualToString:@"minecraftModpack"]) return NO;
+    if ([manifest[@"manifestVersion"] integerValue] != 1) return NO;
+    if (!manifest[@"minecraft"]) return NO;
+    NSDictionary *minecraft = manifest[@"minecraft"];
+    if (!minecraft[@"version"]) return NO;
+    if (!minecraft[@"modLoaders"]) return NO;
+    NSArray *modLoaders = minecraft[@"modLoaders"];
+    if (![modLoaders isKindOfClass:[NSArray class]] || modLoaders.count < 1) return NO;
+    return YES;
 }
 
 @end
