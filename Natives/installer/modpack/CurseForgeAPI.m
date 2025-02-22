@@ -74,8 +74,7 @@
 - (void)getDownloadUrlForProject:(unsigned long long)projectID
                           fileID:(unsigned long long)fileID
                       completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
-    NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url",
-                          projectID, fileID];
+    NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
     __block int attempt = 0;
     __weak typeof(self) weakSelf = self;
     
@@ -104,17 +103,17 @@
                     });
                 } else {
                     // Fallback branch:
-                    // Build a direct API link (optionally with API key)...
+                    // 1) Build a direct API link (append API key if available)
                     NSString *fallbackUrl = [NSString stringWithFormat:
                         @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download",
                         projectID, fileID];
                     if (strongSelf.apiKey && strongSelf.apiKey.length > 0) {
                         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", strongSelf.apiKey];
                     }
-                    // ...and then attempt to build a media link.
+                    // 2) Attempt to build a media.forgecdn.net link from file metadata.
                     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
                     [strongSelf getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
-                        // Log the fallbackResponse to see its structure.
+                        // Log the raw fallback response for debugging.
                         NSLog(@"Fallback response: %@", fallbackResponse);
                         
                         if ([fallbackResponse isKindOfClass:[NSDictionary class]]) {
@@ -138,10 +137,17 @@
                                             return;
                                         }
                                     }
+                                } else {
+                                    NSLog(@"Fallback response 'data' keys have unexpected types: id: %@, fileName: %@",
+                                          idNumberObj, fileNameObj);
                                 }
+                            } else {
+                                NSLog(@"Fallback response 'data' is not a dictionary: %@", dataObj);
                             }
+                        } else {
+                            NSLog(@"Fallback response is not a dictionary: %@", fallbackResponse);
                         }
-                        // If we couldn't build a media link, use the fallback URL.
+                        // If we couldn't build a media link, return the direct fallback URL.
                         if (completion) completion(fallbackUrl, nil);
                     }];
                 }
@@ -501,8 +507,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
                                       ^{
                     NSError *archiveError = nil;
-                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath
-                                                                     error:&archiveError];
+                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
                     if (!archive2) {
                         dispatch_async(dispatch_get_main_queue(), ^{
                             NSLog(@"Failed to reopen archive: %@", archiveError.localizedDescription);
