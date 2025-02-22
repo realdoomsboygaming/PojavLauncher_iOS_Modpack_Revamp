@@ -222,14 +222,14 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         cache = [[NSCache alloc] init];
-        cache.countLimit = 10; // adjust as needed
+        cache.countLimit = 10; // Adjust as needed.
     });
     return cache;
 }
 
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath
                              completion:(void(^)(NSDictionary *manifestDict, NSError *error))completion {
-    // Check if the manifest is already cached.
+    // Check cache.
     NSCache *cache = [CurseForgeAPI manifestCache];
     NSDictionary *cachedManifest = [cache objectForKey:packagePath];
     if (cachedManifest) {
@@ -240,26 +240,37 @@
     // Open the archive.
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:nil];
     if (!archive) {
-        NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Unable to open archive."}];
+        NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
+                                             code:1
+                                         userInfo:@{NSLocalizedDescriptionKey: @"Unable to open archive."}];
         completion(nil, error);
         return;
     }
     
-    // Generate a unique temporary file path for the manifest.
-    NSString *tempManifestPath = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"manifest_%@", [[NSUUID UUID] UUIDString]]];
+    // Generate a unique temporary file path.
+    NSString *tempManifestPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                  [NSString stringWithFormat:@"manifest_%@", [[NSUUID UUID] UUIDString]]];
     
-    // Extract the manifest file to disk asynchronously.
+    // Instead of extractFile:toPath:error:, use extractDataFromFile:error: then write to disk.
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *extractError = nil;
-        BOOL success = [archive extractFile:@"manifest.json" toPath:tempManifestPath error:&extractError];
-        if (!success || extractError) {
+        NSData *extractedData = [archive extractDataFromFile:@"manifest.json" error:&extractError];
+        if (!extractedData || extractError) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(nil, extractError);
             });
             return;
         }
+        BOOL writeSuccess = [extractedData writeToFile:tempManifestPath atomically:YES];
+        if (!writeSuccess) {
+            NSError *writeError = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to write manifest to disk."}];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, writeError);
+            });
+            return;
+        }
         
-        // Read the manifest file using memory-mapped reading.
+        // Read using memory mapping.
         NSError *readError = nil;
         NSData *manifestData = [NSData dataWithContentsOfFile:tempManifestPath options:NSDataReadingMappedIfSafe error:&readError];
         // Remove the temporary file.
@@ -326,7 +337,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         }
         downloader.progress.totalUnitCount = totalDownloads;
         
-        // Create download tasks for each deduplicated file entry.
+        // Create download tasks.
         for (NSDictionary *fileEntry in files) {
             NSNumber *projectID = fileEntry[@"projectID"];
             NSNumber *fileID = fileEntry[@"fileID"];
@@ -346,7 +357,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 continue;
             }
             
-            // Determine the final file name.
+            // Determine final file name.
             NSString *relativePath = fileEntry[@"path"];
             if (!relativePath || relativePath.length == 0) {
                 relativePath = fileEntry[@"fileName"];
@@ -378,7 +389,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             }
         }
         
-        // Re-open the archive to extract the overrides.
+        // Re-open archive to extract overrides.
         NSError *archiveError = nil;
         UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
         if (!archive) {
