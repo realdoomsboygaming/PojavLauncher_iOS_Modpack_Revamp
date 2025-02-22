@@ -6,7 +6,17 @@
 #import "UnzipKit.h"
 #import "AFNetworking.h"
 
-// Constants for CurseForge API
+// Minimal implementation for saving JSON to file.
+// Returns nil if successful, or an NSError if there was a problem.
+static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:&error];
+    if (!data) return error;
+    BOOL success = [data writeToFile:filePath options:NSDataWritingAtomic error:&error];
+    if (!success) return error;
+    return nil;
+}
+
 #define kCurseForgeGameIDMinecraft 432
 #define kCurseForgeClassIDModpack 4471
 #define kCurseForgeClassIDMod 6
@@ -128,13 +138,14 @@
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
     // Build direct fallback URL
     NSString *fallbackUrl = [NSString stringWithFormat:
-        @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download",
-        projectID, fileID];
+        @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
+    // Use NSStringWithUTF8String for getenv conversion.
+    NSString *gameDir = [NSString stringWithUTF8String:getenv("CURJAV_GAME_DIR")];
     if (self.apiKey && self.apiKey.length > 0) {
         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", self.apiKey];
     }
     
-    // Attempt to build a media.forgecdn.net link from metadata
+    // Attempt to build a media.forgecdn.net link from file metadata
     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     [self getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
         NSLog(@"Fallback response: %@", fallbackResponse);
@@ -175,8 +186,7 @@
         } else {
             NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
                                                code:-1002
-                                           userInfo:@{NSLocalizedDescriptionKey:
-                                                      @"Unable to obtain any valid download URL."}];
+                                           userInfo:@{NSLocalizedDescriptionKey: @"Unable to obtain any valid download URL."}];
             if (completion) completion(nil, err);
         }
     }];
@@ -239,9 +249,7 @@
         NSString *query = searchFilters[@"name"] ?: @"";
         NSMutableDictionary *params = [@{
             @"gameId": @(kCurseForgeGameIDMinecraft),
-            @"classId": ([searchFilters[@"isModpack"] boolValue]
-                         ? @(kCurseForgeClassIDModpack)
-                         : @(kCurseForgeClassIDMod)),
+            @"classId": ([searchFilters[@"isModpack"] boolValue] ? @(kCurseForgeClassIDModpack) : @(kCurseForgeClassIDMod)),
             @"searchFilter": query,
             @"sortField": @(1),
             @"sortOrder": @"desc",
@@ -312,6 +320,7 @@
             
             for (NSDictionary *file in files) {
                 [names addObject:[NSString stringWithFormat:@"%@", file[@"fileName"] ?: @""]];
+                
                 id versions = file[@"gameVersion"] ?: file[@"gameVersionList"];
                 NSString *gameVersion = @"";
                 if ([versions isKindOfClass:[NSArray class]] && [versions count] > 0) {
@@ -425,7 +434,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }
                 }
                 
-                // Set progress total unit count to number of unique files
+                // Set progress total unit count to the number of unique files
                 dispatch_async(dispatch_get_main_queue(), ^{
                     downloader.progress.totalUnitCount = files.count;
                 });
@@ -472,7 +481,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
                         
-                        // Use real file size, falling back to 1 if not provided
+                        // Use real file size if provided, defaulting to 1 if missing
                         NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
                         if (rawSize == 0) { rawSize = 1; }
                         
@@ -543,7 +552,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     if (depInfo[@"json"]) {
                         NSString *jsonPath = [NSString stringWithFormat:
                                               @"%1$s/versions/%2$@/%2$@.json",
-                                              getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
+                                              [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask =
                             [downloader createDownloadTask:depInfo[@"json"]
                                                        size:1
@@ -558,7 +567,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                     }
                     
-                    // Process the "minecraft" block to determine the loader version
+                    // Process the "minecraft" block to determine loader version
                     NSDictionary *minecraft = manifestDict[@"minecraft"];
                     NSString *vanillaVersion = @"";
                     NSString *modLoaderId = @"";
@@ -607,7 +616,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                     }
                     
-                    // Create a new profile without an extra subdirectory (just "./<folder>")
+                    // Create a new profile without adding an extra subdirectory (just "./<folder>")
                     NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
                     if (profileName.length > 0) {
                         NSDictionary *profileInfo = @{
@@ -623,7 +632,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         });
                     }
                     
-                    // Auto-install the loader based on finalVersionString
+                    // Auto-install loader: Forge or Fabric
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([modLoaderId isEqualToString:@"forge"]) {
                             [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
@@ -648,13 +657,12 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     }
     // Build final ID (e.g., "1.19.2-forge-43.1.1")
     NSString *finalId = [NSString stringWithFormat:@"%@-forge-%@", vanillaVer, forgeVer];
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", getenv("POJAV_GAME_DIR"), finalId, finalId];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], finalId, finalId];
     
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES
                                                attributes:nil
                                                     error:nil];
-    // Minimal Forge installer JSON dictionary—expand as needed.
     NSDictionary *forgeDict = @{
         @"id": finalId,
         @"type": @"custom",
@@ -675,7 +683,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSLog(@"autoInstallFabric: Missing fabric version string.");
         return;
     }
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", getenv("POJAV_GAME_DIR"), fabricString, fabricString];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], fabricString, fabricString];
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES
                                                attributes:nil
