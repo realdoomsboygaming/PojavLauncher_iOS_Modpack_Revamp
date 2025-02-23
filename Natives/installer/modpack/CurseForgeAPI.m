@@ -552,9 +552,10 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     NSDictionary<NSString *, NSString *> *depInfo =
                         [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
-                        NSString *jsonPath = [NSString stringWithFormat:
-                                              @"%1$s/versions/%2$@/%2$@.json",
-                                              [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
+                        NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
+                                              [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                                              depInfo[@"id"],
+                                              depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask =
                             [downloader createDownloadTask:depInfo[@"json"]
                                                        size:1
