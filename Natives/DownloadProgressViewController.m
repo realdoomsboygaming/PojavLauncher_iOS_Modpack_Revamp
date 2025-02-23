@@ -2,7 +2,7 @@
 #import <objc/runtime.h>
 #import "DownloadProgressViewController.h"
 
-// Use static const pointers for associated object keys.
+// Associated object keys.
 static const void *kProgressKey = &kProgressKey;
 static const void *kCellKey = &kCellKey;
 static void *CellProgressObserverContext = &CellProgressObserverContext;
@@ -27,7 +27,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
          initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(actionClose)];
     self.tableView.allowsSelection = NO;
-    // We update visible cells manually to preserve scroll offset.
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -36,7 +35,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
                              forKeyPath:@"fractionCompleted"
                                 options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                                 context:TotalProgressObserverContext];
-    // Start timer to update only visible cells.
     self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
                                                          target:self
                                                        selector:@selector(updateVisibleCells)
@@ -59,16 +57,20 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     for (UITableViewCell *cell in visibleCells) {
         NSProgress *progress = objc_getAssociatedObject(cell, kProgressKey);
         if (progress) {
-            // Update cell UI directly.
-            cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
-            cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-            if (!progress.finished) {
+            if (progress.finished) {
+                cell.detailTextLabel.text = @"Done";
+                cell.accessoryType = UITableViewCellAccessoryCheckmark;
+            } else {
+                double completed = progress.completedUnitCount;
+                double total = progress.totalUnitCount;
+                NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
+                cell.detailTextLabel.text = formatted;
+                cell.accessoryType = UITableViewCellAccessoryNone;
                 allFinished = NO;
             }
         }
     }
     self.title = [NSString stringWithFormat:@"Downloading (%lu files)", (unsigned long)self.task.fileList.count];
-    // If all progress objects are finished, dismiss the progress view after a brief delay.
     if (allFinished && self.task.fileList.count > 0) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self actionClose];
@@ -87,8 +89,16 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         UITableViewCell *cell = objc_getAssociatedObject(progress, kCellKey);
         if (!cell) return;
         dispatch_async(dispatch_get_main_queue(), ^{
-            cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
-            cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+            if (progress.finished) {
+                cell.detailTextLabel.text = @"Done";
+                cell.accessoryType = UITableViewCellAccessoryCheckmark;
+            } else {
+                double completed = progress.completedUnitCount;
+                double total = progress.totalUnitCount;
+                NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
+                cell.detailTextLabel.text = formatted;
+                cell.accessoryType = UITableViewCellAccessoryNone;
+            }
         });
     } else if (context == TotalProgressObserverContext) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -108,7 +118,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Dequeue a reusable cell.
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) {
        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
@@ -123,7 +132,6 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     }
     cell.textLabel.text = fileName;
     
-    // Remove any previous observer.
     NSProgress *oldProgress = objc_getAssociatedObject(cell, kProgressKey);
     if (oldProgress) {
        @try {
@@ -149,8 +157,16 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
                 options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                 context:CellProgressObserverContext];
     
-    cell.detailTextLabel.text = progress.finished ? @"Done" : @"";
-    cell.accessoryType = progress.finished ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    if (progress.finished) {
+        cell.detailTextLabel.text = @"Done";
+        cell.accessoryType = UITableViewCellAccessoryCheckmark;
+    } else {
+        double completed = progress.completedUnitCount;
+        double total = progress.totalUnitCount;
+        NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
+        cell.detailTextLabel.text = formatted;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    }
     
     return cell;
 }
