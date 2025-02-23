@@ -522,7 +522,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                                                                        toPath:destinationPath];
                             if (task) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
-                                    // createDownloadTask handles fileList addition so no extra addition here.
                                     NSLog(@"Starting download for %@", relativePath);
                                     [task resume];
                                 });
@@ -545,31 +544,27 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
-                        // NEW: After downloads complete, move all .jar files to the mods folder.
+                        
+                        // NEW: Extract entire modpack zip into destPath instead of just "overrides"
+                        NSError *extractError = nil;
+                        // Using UZKArchive’s unzipFileToDestination method.
+                        UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&extractError];
+                        if (!archive2) {
+                            NSLog(@"Failed to reopen archive: %@", extractError.localizedDescription);
+                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", extractError.localizedDescription]];
+                            return;
+                        }
+                        if (![archive2 unzipFileToDestination:destPath overwrite:YES password:nil error:&extractError]) {
+                            NSLog(@"Failed to extract modpack contents: %@", extractError.localizedDescription);
+                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract modpack contents: %@", extractError.localizedDescription]];
+                            return;
+                        }
+                        
+                        // NEW: After extracting, move all .jar files to the mods folder.
                         [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
+                        
+                        [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                     });
-                    
-                    NSError *archiveError = nil;
-                    UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
-                    if (!archive2) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            NSLog(@"Failed to reopen archive: %@", archiveError.localizedDescription);
-                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", archiveError.localizedDescription]];
-                        });
-                        return;
-                    }
-                    
-                    NSError *extractError = nil;
-                    [ModpackUtils archive:archive2 extractDirectory:@"overrides" toPath:destPath error:&extractError];
-                    if (extractError) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            NSLog(@"Failed to extract overrides: %@", extractError.localizedDescription);
-                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides: %@", extractError.localizedDescription]];
-                        });
-                        return;
-                    }
-                    
-                    [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                     
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
