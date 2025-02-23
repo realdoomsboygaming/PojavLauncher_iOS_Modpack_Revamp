@@ -18,16 +18,14 @@
 }
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters
-                      previousPageResult:(NSMutableArray *)prevResult
-{
+                      previousPageResult:(NSMutableArray *)prevResult {
     [self doesNotRecognizeSelector:_cmd];
     return nil;
 }
 
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
  submitDownloadTasksFromPackage:(NSString *)packagePath
-            toPath:(NSString *)destPath
-{
+            toPath:(NSString *)destPath {
     [self doesNotRecognizeSelector:_cmd];
 }
 
