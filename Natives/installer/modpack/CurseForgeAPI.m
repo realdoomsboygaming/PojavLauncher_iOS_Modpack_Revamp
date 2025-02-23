@@ -538,7 +538,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
-                        NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
+                        // Fixed the format specifier here: changed %1$s to %1$@
+                        NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
                         if (depTask) {
                             dispatch_async(dispatch_get_main_queue(), ^{
