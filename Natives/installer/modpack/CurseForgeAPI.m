@@ -138,8 +138,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     // Build direct fallback URL.
     NSString *fallbackUrl = [NSString stringWithFormat:
         @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
-    // Use NSStringWithUTF8String for getenv conversion.
-    NSString *gameDir = [NSString stringWithUTF8String:getenv("CURJAV_GAME_DIR")];
     if (self.apiKey && self.apiKey.length > 0) {
         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", self.apiKey];
     }
@@ -433,7 +431,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }
                 }
                 
-                // Do not manually set downloader.progress.totalUnitCount here.
+                // Note: Do not manually set downloader.progress.totalUnitCount here.
                 // Each download task adds its child progress to the parent.
                 
                 NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
@@ -479,7 +477,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
                         
-                        // Use real file size, defaulting to 1 if missing.
+                        // Use real file size if provided, defaulting to 1 if missing.
                         NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
                         if (rawSize == 0) { rawSize = 1; }
                         
@@ -516,6 +514,12 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 // After all file downloads have been submitted.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    // Force parent's progress to complete in case it's off by one.
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
+                        downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
+                    });
+                    
                     NSError *archiveError = nil;
                     UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&archiveError];
                     if (!archive2) {
@@ -541,7 +545,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         return;
                     }
                     
-                    // Remove the package zip.
+                    // Remove the package file.
                     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                     
                     // Process dependencies.
@@ -614,7 +618,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                     }
                     
-                    // Create a new profile; gameDir is set to "./<destPath.lastPathComponent>" only.
+                    // Create a new profile (gameDir set to "./<destPath.lastPathComponent>")
                     NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
                     if (profileName.length > 0) {
                         NSDictionary *profileInfo = @{
