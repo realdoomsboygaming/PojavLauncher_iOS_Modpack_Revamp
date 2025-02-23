@@ -400,8 +400,35 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 return;
             }
             
-            // Extract all files into destPath.
-            BOOL extractSuccess = [archive extractToPath:destPath error:&err];
+            // Extract all files into destPath by iterating over each file in the archive.
+            __block BOOL extractSuccess = YES;
+            [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
+                NSString *destItemPath = [destPath stringByAppendingPathComponent:fileInfo.filename];
+                if (fileInfo.isDirectory) {
+                    [[NSFileManager defaultManager] createDirectoryAtPath:destItemPath withIntermediateDirectories:YES attributes:nil error:nil];
+                } else {
+                    NSString *destDirPath = [destItemPath stringByDeletingLastPathComponent];
+                    BOOL createdDir = [[NSFileManager defaultManager] createDirectoryAtPath:destDirPath withIntermediateDirectories:YES attributes:nil error:nil];
+                    if (!createdDir) {
+                        *stop = YES;
+                        extractSuccess = NO;
+                        return;
+                    }
+                    NSData *data = [archive extractData:fileInfo error:&err];
+                    if (!data) {
+                        *stop = YES;
+                        extractSuccess = NO;
+                        return;
+                    }
+                    BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:&err];
+                    if (!written) {
+                        *stop = YES;
+                        extractSuccess = NO;
+                        return;
+                    }
+                }
+            } error:&err];
+            
             if (!extractSuccess) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     NSLog(@"Failed to extract archive: %@", err.localizedDescription);
@@ -431,7 +458,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 return;
             }
             
-            // Process the manifest for dependency downloads and loader installation.
+            // Process dependencies.
             NSDictionary<NSString *, NSString *> *depInfo =
                 [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
             if (depInfo[@"json"]) {
@@ -531,7 +558,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
             
             // Remove the modpack package now that everything is extracted.
             [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-        });
+        }
     });
 }
 
