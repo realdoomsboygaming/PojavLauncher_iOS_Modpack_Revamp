@@ -1,6 +1,7 @@
 #import "MinecraftResourceDownloadTask.h"
 #import "ModrinthAPI.h"
 #import "PLProfiles.h"
+#import "ModpackUtils.h"
 
 @implementation ModrinthAPI
 
@@ -10,14 +11,14 @@
 
 - (NSMutableArray *)searchModWithFilters:(NSDictionary<NSString *, NSString *> *)searchFilters previousPageResult:(NSMutableArray *)modrinthSearchResult {
     int limit = 50;
-    
+
     NSMutableString *facetString = [NSMutableString stringWithString:@"["];
     [facetString appendFormat:@"[\"project_type:%@\"]", ([searchFilters[@"isModpack"] boolValue] ? @"modpack" : @"mod")];
     if (searchFilters[@"mcVersion"].length > 0) {
         [facetString appendFormat:@",[\"versions:%@\"]", searchFilters[@"mcVersion"]];
     }
     [facetString appendString:@"]"];
-    
+
     NSDictionary *params = @{
         @"facets": facetString,
         @"query": (searchFilters[@"name"] ? [searchFilters[@"name"] stringByReplacingOccurrencesOfString:@" " withString:@"+"] : @""),
@@ -29,7 +30,7 @@
     if (!response) {
         return nil;
     }
-    
+
     NSMutableArray *result = modrinthSearchResult ?: [NSMutableArray new];
     for (NSDictionary *hit in response[@"hits"]) {
         BOOL isModpack = [hit[@"project_type"] isEqualToString:@"modpack"];
@@ -57,7 +58,7 @@
     NSMutableArray *urls = [NSMutableArray arrayWithCapacity:response.count];
     NSMutableArray *hashes = [NSMutableArray arrayWithCapacity:response.count];
     NSMutableArray *sizes = [NSMutableArray arrayWithCapacity:response.count];
-    
+
     [response enumerateObjectsUsingBlock:^(NSDictionary *version, NSUInteger i, BOOL *stop) {
         NSDictionary *file = [version[@"files"] firstObject];
         [mcNames addObject:(version[@"game_versions"] && [version[@"game_versions"] count] > 0 ? version[@"game_versions"][0] : @"")];
@@ -81,14 +82,16 @@
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to open modpack package: %@", error.localizedDescription]];
         return;
     }
-    
+
     NSData *indexData = [archive extractDataFromFile:@"modrinth.index.json" error:&error];
     NSDictionary *indexDict = [NSJSONSerialization JSONObjectWithData:indexData options:0 error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to parse modrinth.index.json: %@", error.localizedDescription]];
         return;
     }
-    
+
+    // Ensure unique file paths are counted
+    NSArray *filesArray = indexDict[@"files"];
     NSSet *uniqueFiles = [NSSet setWithArray:[filesArray valueForKey:@"path"]];
     downloader.progress.totalUnitCount = uniqueFiles.count;
 
@@ -97,6 +100,7 @@
         NSString *sha = indexFile[@"hashes"][@"sha1"] ?: @"";
         NSString *path = [destPath stringByAppendingPathComponent:indexFile[@"path"] ?: @""];
         NSUInteger size = [indexFile[@"fileSize"] unsignedLongLongValue];
+
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:size sha:sha altName:nil toPath:path];
         if (task) {
             [downloader.fileList addObject:indexFile[@"path"] ?: @""];
@@ -107,28 +111,28 @@
             return;
         }
     }
-    
+
     [ModpackUtils archive:archive extractDirectory:@"overrides" toPath:destPath error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract overrides from modpack package: %@", error.localizedDescription]];
         return;
     }
-    
+
     [ModpackUtils archive:archive extractDirectory:@"client-overrides" toPath:destPath error:&error];
     if (error) {
         [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract client-overrides from modpack package: %@", error.localizedDescription]];
         return;
     }
-    
+
     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-    
+
     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:indexDict[@"dependencies"]];
     if (depInfo[@"json"]) {
         NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:0 sha:nil altName:nil toPath:jsonPath];
         [task resume];
     }
-    
+
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
     NSDictionary *profileInfo = @{
         @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
@@ -137,8 +141,7 @@
         @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@",
                   [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
     };
-    PLProfiles.current.profiles[indexDict[@"name"] ?: @""] = [profileInfo mutableCopy];
-    PLProfiles.current.selectedProfileName = indexDict[@"name"] ?: @"";
+    PLProfiles.current.profiles[indexDict[@"name"]] = profileInfo;
 }
 
 @end
