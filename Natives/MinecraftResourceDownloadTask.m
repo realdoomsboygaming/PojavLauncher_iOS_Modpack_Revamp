@@ -290,11 +290,11 @@
     self.textProgress = [NSProgress new];
     self.textProgress.kind = NSProgressKindFile;
     self.textProgress.fileOperationKind = NSProgressFileOperationKindDownloading;
-    self.textProgress.totalUnitCount = -1;
+    self.textProgress.totalUnitCount = 0;
 
     self.progress = [NSProgress new];
     // Push 1 byte so it won't accidentally finish after downloading assets index
-    self.progress.totalUnitCount = 1;
+    self.progress.totalUnitCount = 0;
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
