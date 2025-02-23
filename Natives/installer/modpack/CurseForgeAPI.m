@@ -6,6 +6,15 @@
 #import "UnzipKit.h"
 #import "AFNetworking.h"
 
+// If your project already defines these functions, remove these macros.
+#ifndef localize
+#define localize(key, param) (key)
+#endif
+
+#ifndef showDialog
+#define showDialog(title, msg) NSLog(@"%@: %@", title, msg)
+#endif
+
 // Minimal helper: save a JSON dictionary to a file. Returns nil on success or an NSError on failure.
 static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSError *error = nil;
@@ -61,7 +70,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     
-    // Use API key if available.
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -91,7 +99,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                       completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
     NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
     __block int attempt = 0;
-    
     __weak typeof(self) weakSelf = self;
     __block void (^attemptBlock)(void) = nil;
     __weak void (^weakAttemptBlock)(void) = nil;
@@ -135,14 +142,11 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 - (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID
                                      fileID:(unsigned long long)fileID
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
-    // Build direct fallback URL.
     NSString *fallbackUrl = [NSString stringWithFormat:
         @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
     if (self.apiKey && self.apiKey.length > 0) {
         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", self.apiKey];
     }
-    
-    // Attempt to build a media.forgecdn.net link from metadata.
     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     [self getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
         NSLog(@"Fallback response: %@", fallbackResponse);
@@ -317,7 +321,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             
             for (NSDictionary *file in files) {
                 [names addObject:[NSString stringWithFormat:@"%@", file[@"fileName"] ?: @""]];
-                
                 id versions = file[@"gameVersion"] ?: file[@"gameVersionList"];
                 NSString *gameVersion = @"";
                 if ([versions isKindOfClass:[NSArray class]] && [versions count] > 0) {
@@ -431,9 +434,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }
                 }
                 
-                // Note: Do not manually set downloader.progress.totalUnitCount here.
-                // Each download task adds its child progress to the parent.
-                
                 NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 
                 // Process each unique file download.
@@ -514,7 +514,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 // After all file downloads have been submitted.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    // Force parent's progress to complete in case it's off by one.
+                    // Force parent's progress to complete.
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
@@ -554,8 +554,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     if (depInfo[@"json"]) {
                         NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
                                               [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                                              depInfo[@"id"],
-                                              depInfo[@"id"]];
+                                              depInfo[@"id"], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask =
                             [downloader createDownloadTask:depInfo[@"json"]
                                                        size:1
@@ -619,10 +618,11 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                     }
                     
-                    // Create a new profile (gameDir set to "./<destPath.lastPathComponent>")
+                    // Create a new profile.
                     NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
                     if (profileName.length > 0) {
                         NSDictionary *profileInfo = @{
+                            // Here, we use just the modpack folder name (destPath.lastPathComponent) rather than nesting under a subdirectory.
                             @"gameDir": [NSString stringWithFormat:@"./%@", destPath.lastPathComponent],
                             @"name": profileName,
                             @"lastVersionId": finalVersionString,
@@ -635,7 +635,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         });
                     }
                     
-                    // Auto-install the loader (Forge or Fabric).
+                    // Auto-install the loader.
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([modLoaderId isEqualToString:@"forge"]) {
                             [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
@@ -660,7 +660,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     }
     // Build final ID (e.g., "1.19.2-forge-43.1.1")
     NSString *finalId = [NSString stringWithFormat:@"%@-forge-%@", vanillaVer, forgeVer];
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], finalId, finalId];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
+                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                          finalId, finalId];
     
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES
@@ -686,7 +688,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSLog(@"autoInstallFabric: Missing fabric version string.");
         return;
     }
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], fabricString, fabricString];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
+                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                          fabricString, fabricString];
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES
                                                attributes:nil
@@ -703,6 +707,93 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     } else {
         NSLog(@"autoInstallFabric: Successfully wrote Fabric JSON at %@", jsonPath);
     }
+}
+
+#pragma mark - Prepare for Download
+// Note: The downloader (MinecraftResourceDownloadTask) is expected to handle its own progress initialization.
+// If needed, call the downloader’s own prepare method externally.
+// For reference, if you need to “prepare” here, you would do something like:
+/*
+- (void)prepareForDownloadWithDownloader:(MinecraftResourceDownloadTask *)downloader {
+    downloader.textProgress = [NSProgress new];
+    downloader.textProgress.kind = NSProgressKindFile;
+    downloader.textProgress.fileOperationKind = NSProgressFileOperationKindDownloading;
+    downloader.textProgress.totalUnitCount = 0;
+    
+    downloader.progress = [NSProgress new];
+    downloader.progress.totalUnitCount = 0;
+    [downloader.fileList removeAllObjects];
+    [downloader.progressList removeAllObjects];
+}
+*/
+
+#pragma mark - Error Handling
+- (void)finishDownloadWithErrorString:(NSString *)error {
+    // In this API code, simply log the error. The downloader should handle its own error cleanup.
+    NSLog(@"Download error: %@", error);
+    // For example, you might call: [downloader finishDownloadWithErrorString:error];
+}
+
+- (void)finishDownloadWithError:(NSError *)error file:(NSString *)file {
+    NSString *errorStr = [NSString stringWithFormat:localize(@"launcher.mcl.error_download", nil),
+                          file, error.localizedDescription];
+    NSLog(@"[MCDL] Error: %@ %@", errorStr, NSThread.callStackSymbols);
+    [self finishDownloadWithErrorString:errorStr];
+}
+
+#pragma mark - Access Check and SHA Validation
+- (BOOL)checkAccessWithDialog:(BOOL)show {
+    BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."]
+                   || (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
+    if (!accessible) {
+        // The downloader should cancel its progress.
+        NSLog(@"Access denied: Minecraft cannot be installed with a local account.");
+        if (show) {
+            [self finishDownloadWithErrorString:@"Minecraft can't be legally installed with a local account. Please switch to an online account."];
+        }
+    }
+    return accessible;
+}
+
+- (BOOL)checkSHAIgnorePref:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
+    if (sha.length == 0) {
+        BOOL existence = [[NSFileManager defaultManager] fileExistsAtPath:path];
+        if (existence) {
+            NSLog(@"[MCDL] Warning: no SHA for %@, assuming okay", (altName ?: path.lastPathComponent));
+        }
+        return existence;
+    }
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) {
+        NSLog(@"[MCDL] File does not exist for SHA check: %@", altName ?: path.lastPathComponent);
+        return NO;
+    }
+    unsigned char digest[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1(data.bytes, (CC_LONG)data.length, digest);
+    NSMutableString *localSHA = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
+        [localSHA appendFormat:@"%02x", digest[i]];
+    }
+    BOOL check = [sha isEqualToString:localSHA];
+    if (!check || (getPrefBool(@"general.debug_logging") && logSuccess)) {
+        NSLog(@"[MCDL] SHA1 %@ for %@ (expected: %@, got: %@)",
+              check ? @"passed" : @"failed",
+              (altName ?: path.lastPathComponent),
+              sha, localSHA);
+    }
+    return check;
+}
+
+- (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
+    if (getPrefBool(@"general.check_sha")) {
+        return [self checkSHAIgnorePref:sha forFile:path altName:altName logSuccess:logSuccess];
+    } else {
+        return [[NSFileManager defaultManager] fileExistsAtPath:path];
+    }
+}
+
+- (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName {
+    return [self checkSHA:sha forFile:path altName:altName logSuccess:(altName == nil)];
 }
 
 #pragma mark - Manifest Verification
