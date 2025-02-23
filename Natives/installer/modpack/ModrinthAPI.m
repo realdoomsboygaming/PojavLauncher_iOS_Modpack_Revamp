@@ -89,8 +89,9 @@
         return;
     }
     
-    NSArray *filesArray = indexDict[@"files"];
-    downloader.progress.totalUnitCount = filesArray.count;
+    NSSet *uniqueFiles = [NSSet setWithArray:[filesArray valueForKey:@"path"]];
+    downloader.progress.totalUnitCount = uniqueFiles.count;
+
     for (NSDictionary *indexFile in filesArray) {
         NSString *url = [indexFile[@"downloads"] firstObject] ?: @"";
         NSString *sha = indexFile[@"hashes"][@"sha1"] ?: @"";
