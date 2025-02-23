@@ -12,6 +12,7 @@
 
 @interface MinecraftResourceDownloadTask ()
 @property (nonatomic, strong) AFURLSessionManager *manager;
+@property (nonatomic, strong) NSString *gameDir; // Cached game directory string
 @end
 
 @implementation MinecraftResourceDownloadTask
@@ -19,6 +20,10 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
+        // Cache the game directory once (convert from C string to NSString)
+        const char *envGameDir = getenv("POJAV_GAME_DIR");
+        self.gameDir = envGameDir ? [NSString stringWithUTF8String:envGameDir] : @"";
+        
         // Use default configuration
         NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
         configuration.timeoutIntervalForRequest = 86400;
@@ -29,13 +34,14 @@
     return self;
 }
 
-// Our main createDownloadTask: method with a success callback
+#pragma mark - Download Task Creation
+
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url
-                                           size:(NSUInteger)size
-                                            sha:(NSString *)sha
-                                        altName:(NSString *)altName
-                                          toPath:(NSString *)path
-                                        success:(void(^)(void))success
+                                            size:(NSUInteger)size
+                                             sha:(NSString *)sha
+                                         altName:(NSString *)altName
+                                           toPath:(NSString *)path
+                                         success:(void(^)(void))success
 {
     BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
     if (fileExists && [self checkSHA:sha forFile:path altName:altName]) {
@@ -49,19 +55,37 @@
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
     
     __block NSProgress *childProgress = nil;
+    __weak typeof(self) weakSelf = self;
     NSURLSessionDownloadTask *task = [self.manager downloadTaskWithRequest:request
         progress:nil
         destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
+            __strong typeof(weakSelf) self = weakSelf;
+            // Log the download starting.
             NSLog(@"[MCDL] Downloading %@", name);
-            [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
-                                    withIntermediateDirectories:YES
-                                                     attributes:nil
-                                                          error:nil];
-            [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+            
+            // Create directory if needed, and check for errors.
+            NSError *dirError = nil;
+            BOOL created = [NSFileManager.defaultManager createDirectoryAtPath:[path stringByDeletingLastPathComponent]
+                                                   withIntermediateDirectories:YES
+                                                                    attributes:nil
+                                                                         error:&dirError];
+            if (!created) {
+                NSLog(@"[MCDL] Error creating directory: %@", dirError);
+            }
+            
+            // Remove any existing file (log error if needed)
+            NSError *removeError = nil;
+            [NSFileManager.defaultManager removeItemAtPath:path error:&removeError];
+            if (removeError) {
+                NSLog(@"[MCDL] Error removing old file at path %@: %@", path, removeError);
+            }
+            
             return [NSURL fileURLWithPath:path];
         }
         completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error)
         {
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
             if (self.progress.cancelled) {
                 // If cancelled, ignore errors.
             } else if (error != nil) {
@@ -70,7 +94,7 @@
                 [self finishDownloadWithErrorString:[NSString stringWithFormat:
                     @"Failed to verify file %@: SHA1 mismatch", path.lastPathComponent]];
             } else {
-                // Mark childProgress as "finished" by forcibly setting completed to total:
+                // Mark childProgress as "finished" by setting completed to total.
                 if (childProgress) {
                     [childProgress willChangeValueForKey:@"fractionCompleted"];
                     childProgress.completedUnitCount = childProgress.totalUnitCount;
@@ -81,20 +105,16 @@
         }
     ];
     
-    // If a valid task was created, let's add it to our overall progress
+    // If a valid task was created, add it to overall progress.
     if (task) {
-        // Set up per-file progress as 1 unit
         childProgress = [self.manager downloadProgressForTask:task];
         [self addChildProgress:childProgress];
         
-        // Avoid duplicates in fileList
         @synchronized(self.fileList) {
             if (![self.fileList containsObject:name]) {
                 [self.fileList addObject:name];
             }
         }
-        
-        // Keep the childProgress in progressList for the UI
         @synchronized(self.progressList) {
             [self.progressList addObject:childProgress];
         }
@@ -105,29 +125,29 @@
 
 // Convenience method without the 'success' callback
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url
-                                           size:(NSUInteger)size
-                                            sha:(NSString *)sha
-                                        altName:(NSString *)altName
-                                          toPath:(NSString *)path
+                                            size:(NSUInteger)size
+                                             sha:(NSString *)sha
+                                         altName:(NSString *)altName
+                                           toPath:(NSString *)path
 {
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
-// Just set each file as 1 progress unit
 - (void)addChildProgress:(NSProgress *)childProgress {
-    // We'll treat each file as 1 "unit" so progress is measured in # of files
+    // Each file is treated as 1 "unit" of progress.
     childProgress.kind = NSProgressKindFile;
     childProgress.totalUnitCount = 1;
     
-    // Add to our main progress
+    // Add to our main progress.
     [self.progress addChild:childProgress withPendingUnitCount:1];
     self.progress.totalUnitCount += 1;
     
-    // Mirror the total in textProgress
+    // Mirror the total in textProgress.
     self.textProgress.totalUnitCount = self.progress.totalUnitCount;
 }
 
-// Download version metadata
+#pragma mark - Version and Asset Downloads
+
 - (void)downloadVersionMetadata:(NSDictionary *)version success:(void(^)(void))success {
     NSString *versionStr = version[@"id"];
     if ([versionStr isEqualToString:@"latest-release"]) {
@@ -136,8 +156,9 @@
         versionStr = getPrefObject(@"internal.latest_version.snapshot");
     }
     
-    NSString *path = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json",
-                      getenv("POJAV_GAME_DIR"), versionStr];
+    // Use stringByAppendingPathComponent for safer path building.
+    NSString *path = [[self.gameDir stringByAppendingPathComponent:@"versions"] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/%@.json", versionStr, versionStr]];
+    
     version = (id)[MinecraftResourceUtils findVersion:versionStr inList:remoteVersionList];
     
     void(^completionBlock)(void) = ^{
@@ -147,9 +168,8 @@
             return;
         }
         if (self.metadata[@"inheritsFrom"]) {
-            NSMutableDictionary *inheritsFromDict = parseJSONFromFile([NSString stringWithFormat:
-                @"%1$s/versions/%2$@/%2$@.json",
-                getenv("POJAV_GAME_DIR"), self.metadata[@"inheritsFrom"]]);
+            NSString *inheritsPath = [[self.gameDir stringByAppendingPathComponent:@"versions"] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/%@.json", self.metadata[@"inheritsFrom"], self.metadata[@"inheritsFrom"]]];
+            NSMutableDictionary *inheritsFromDict = parseJSONFromFile(inheritsPath);
             if (inheritsFromDict) {
                 [MinecraftResourceUtils processVersion:self.metadata inheritsFrom:inheritsFromDict];
                 self.metadata = inheritsFromDict;
@@ -166,8 +186,8 @@
             return;
         } else if (json[@"inheritsFrom"]) {
             version = (id)[MinecraftResourceUtils findVersion:json[@"inheritsFrom"] inList:remoteVersionList];
-            path = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json",
-                    getenv("POJAV_GAME_DIR"), json[@"inheritsFrom"]];
+            NSString *inheritsPath = [[self.gameDir stringByAppendingPathComponent:@"versions"] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/%@.json", json[@"inheritsFrom"], json[@"inheritsFrom"]]];
+            path = inheritsPath;
         } else {
             completionBlock();
             return;
@@ -188,7 +208,6 @@
     [task resume];
 }
 
-// Download the asset index if needed
 - (void)downloadAssetMetadataWithSuccess:(void(^)(void))success {
     NSDictionary *assetIndex = self.metadata[@"assetIndex"];
     if (!assetIndex) {
@@ -196,18 +215,23 @@
         return;
     }
     NSString *name = [NSString stringWithFormat:@"assets/indexes/%@.json", assetIndex[@"id"]];
-    NSString *path = [@(getenv("POJAV_GAME_DIR")) stringByAppendingPathComponent:name];
+    NSString *path = [self.gameDir stringByAppendingPathComponent:name];
     NSString *url = assetIndex[@"url"];
     NSString *sha = url.stringByDeletingLastPathComponent.lastPathComponent;
     NSUInteger size = [assetIndex[@"size"] unsignedLongLongValue];
-    NSURLSessionDownloadTask *task = [self createDownloadTask:url size:size sha:sha altName:name toPath:path success:^{
+    
+    NSURLSessionDownloadTask *task = [self createDownloadTask:url
+                                                        size:size
+                                                         sha:sha
+                                                     altName:name
+                                                       toPath:path
+                                                      success:^{
         self.metadata[@"assetIndexObj"] = parseJSONFromFile(path);
         success();
     }];
     [task resume];
 }
 
-// Download version libraries
 - (NSArray *)downloadClientLibraries {
     NSMutableArray *tasks = [NSMutableArray new];
     for (NSDictionary *library in self.metadata[@"libraries"]) {
@@ -220,17 +244,17 @@
                 ? @"https://libraries.minecraft.net/"
                 : [library[@"url"] stringByReplacingOccurrencesOfString:@"http://" withString:@"https://"];
             NSArray *libParts = [name componentsSeparatedByString:@":"];
-            artifact[@"path"] = [NSString stringWithFormat:
-                @"%1$@/%2$@/%3$@/%2$@-%3$@.jar",
-                [libParts[0] stringByReplacingOccurrencesOfString:@"." withString:@"/"],
-                libParts[1],
-                libParts[2]
-            ];
+            artifact[@"path"] = [NSString stringWithFormat:@"%@/%@/%@/%@-%@.jar",
+                                 [libParts[0] stringByReplacingOccurrencesOfString:@"." withString:@"/"],
+                                 libParts[1],
+                                 libParts[2],
+                                 libParts[1],
+                                 libParts[2]];
             artifact[@"url"] = [NSString stringWithFormat:@"%@%@", prefix, artifact[@"path"]];
             artifact[@"sha1"] = library[@"checksums"][0];
         }
         
-        NSString *path = [NSString stringWithFormat:@"%s/libraries/%@", getenv("POJAV_GAME_DIR"), artifact[@"path"]];
+        NSString *libPath = [[self.gameDir stringByAppendingPathComponent:@"libraries"] stringByAppendingPathComponent:artifact[@"path"]];
         NSString *sha = artifact[@"sha1"];
         NSUInteger size = [artifact[@"size"] unsignedLongLongValue];
         NSString *url = artifact[@"url"];
@@ -240,7 +264,12 @@
         }
         
         NSURLSessionDownloadTask *task =
-            [self createDownloadTask:url size:size sha:sha altName:name toPath:path success:nil];
+            [self createDownloadTask:url
+                                size:size
+                                 sha:sha
+                             altName:name
+                               toPath:libPath
+                              success:nil];
         if (task) {
             [tasks addObject:task];
         } else if (self.progress.cancelled) {
@@ -250,7 +279,6 @@
     return tasks;
 }
 
-// Download assets
 - (NSArray *)downloadClientAssets {
     NSMutableArray *tasks = [NSMutableArray new];
     NSDictionary *assets = self.metadata[@"assetIndexObj"];
@@ -266,9 +294,9 @@
         
         NSString *path;
         if ([assets[@"map_to_resources"] boolValue]) {
-            path = [NSString stringWithFormat:@"%s/resources/%@", getenv("POJAV_GAME_DIR"), name];
+            path = [self.gameDir stringByAppendingPathComponent:[NSString stringWithFormat:@"resources/%@", name]];
         } else {
-            path = [NSString stringWithFormat:@"%s/assets/objects/%@", getenv("POJAV_GAME_DIR"), pathname];
+            path = [self.gameDir stringByAppendingPathComponent:[NSString stringWithFormat:@"assets/objects/%@", pathname]];
         }
         
         if ([name hasSuffix:@"/minecraft.icns"]) {
@@ -278,7 +306,12 @@
         
         NSString *url = [NSString stringWithFormat:@"https://resources.download.minecraft.net/%@", pathname];
         NSURLSessionDownloadTask *task =
-            [self createDownloadTask:url size:size sha:hash altName:name toPath:path success:nil];
+            [self createDownloadTask:url
+                                size:size
+                                 sha:hash
+                             altName:name
+                               toPath:path
+                              success:nil];
         if (task) {
             [tasks addObject:task];
         } else if (self.progress.cancelled) {
@@ -288,7 +321,6 @@
     return tasks;
 }
 
-// High-level method to download the entire version
 - (void)downloadVersion:(NSDictionary *)version {
     [self prepareForDownload];
     [self downloadVersionMetadata:version success:^{
@@ -312,7 +344,6 @@
     }];
 }
 
-// For modpacks from an API
 - (void)downloadModpackFromAPI:(ModpackAPI *)api
                          detail:(NSDictionary *)modDetail
                         atIndex:(NSUInteger)selectedVersion
@@ -322,42 +353,54 @@
     NSString *url = modDetail[@"versionUrls"][selectedVersion];
     NSUInteger size = [modDetail[@"versionSizes"][selectedVersion] unsignedLongLongValue];
     NSString *sha = modDetail[@"versionHashes"][selectedVersion];
-    NSString *name = [[[modDetail[@"title"] lowercaseString]
-                       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
-                      stringByReplacingOccurrencesOfString:@" " withString:@"_"];
+    NSString *name = [[modDetail[@"title"] lowercaseString]
+                      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    name = [name stringByReplacingOccurrencesOfString:@" " withString:@"_"];
+    
     NSString *packagePath = [NSTemporaryDirectory() stringByAppendingFormat:@"/%@.zip", name];
     
+    __weak typeof(self) weakSelf = self;
     NSURLSessionDownloadTask *task =
-        [self createDownloadTask:url size:size sha:sha altName:nil toPath:packagePath success:^{
-            NSString *destinationPath =
-                [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
-            [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
-        }];
+        [self createDownloadTask:url
+                            size:size
+                             sha:sha
+                         altName:nil
+                           toPath:packagePath
+                          success:^{
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        // Build the destination path using the cached gameDir and a custom subdirectory.
+        NSString *destinationPath = [self.gameDir stringByAppendingPathComponent:[NSString stringWithFormat:@"custom_gamedir/%@", name]];
+        [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
+    }];
     [task resume];
 }
 
-// Prepare our data for a new set of downloads
+#pragma mark - Preparation & Error Handling
+
 - (void)prepareForDownload {
     self.textProgress = [NSProgress new];
     self.textProgress.kind = NSProgressKindFile;
     self.textProgress.fileOperationKind = NSProgressFileOperationKindDownloading;
-    self.textProgress.totalUnitCount = -1;
+    // Using a non-negative initial unit count (avoid -1)
+    self.textProgress.totalUnitCount = 0;
     
     self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 1; // a "fake" unit to avoid immediate completion
+    // Use a "fake" unit to prevent immediate completion.
+    self.progress.totalUnitCount = 1;
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
 
-// On error, we cancel everything
 - (void)finishDownloadWithErrorString:(NSString *)error {
     [self.progress cancel];
     [self.manager invalidateSessionCancelingTasks:YES resetSession:YES];
     showDialog(localize(@"Error", nil), error);
-    self.handleError();
+    if (self.handleError) {
+        self.handleError();
+    }
 }
 
-// On single-file error
 - (void)finishDownloadWithError:(NSError *)error file:(NSString *)file {
     NSString *errorStr = [NSString stringWithFormat:localize(@"launcher.mcl.error_download", NULL),
                           file, error.localizedDescription];
@@ -365,10 +408,9 @@
     [self finishDownloadWithErrorString:errorStr];
 }
 
-// Checking if user is "Demo." or has some local account
 - (BOOL)checkAccessWithDialog:(BOOL)show {
-    BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."]
-                   || (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
+    BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."] ||
+                      (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
     if (!accessible) {
         [self.progress cancel];
         if (show) {
@@ -378,7 +420,8 @@
     return accessible;
 }
 
-// Various SHA checks
+#pragma mark - SHA Checks
+
 - (BOOL)checkSHAIgnorePref:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
     if (sha.length == 0) {
         BOOL existence = [NSFileManager.defaultManager fileExistsAtPath:path];
