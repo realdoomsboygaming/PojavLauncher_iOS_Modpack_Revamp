@@ -24,6 +24,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 @interface CurseForgeAPI ()
 // API key for authentication.
 @property (nonatomic, copy) NSString *apiKey;
+// Cached game directory string.
+@property (nonatomic, strong) NSString *gameDir;
 // Private helper methods.
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest;
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath
@@ -50,6 +52,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     self = [super initWithURL:@"https://api.curseforge.com/v1"];
     if (self) {
         self.apiKey = apiKey;
+        const char *envGameDir = getenv("POJAV_GAME_DIR");
+        self.gameDir = envGameDir ? [NSString stringWithUTF8String:envGameDir] : @"";
         _networkQueue = dispatch_queue_create("com.curseforge.api.network", DISPATCH_QUEUE_SERIAL);
     }
     return self;
@@ -435,7 +439,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     return;
                 }
                 
-                // Log the number of files found in the manifest.
                 NSArray *filesArray = manifestDict[@"files"];
                 NSLog(@"[CurseForgeAPI] Found %lu files in manifest.", (unsigned long)filesArray.count);
                 if (!filesArray || filesArray.count == 0) {
@@ -448,7 +451,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 downloader.progress.totalUnitCount = filesArray.count;
                 
                 for (NSDictionary *fileEntry in filesArray) {
-                    // Example: using fileID to build URL; adjust as needed.
                     NSString *fileID = [NSString stringWithFormat:@"%@", fileEntry[@"fileID"]];
                     if (!fileID.length) {
                         NSLog(@"[CurseForgeAPI] WARNING: Skipping file with missing fileID.");
@@ -473,7 +475,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }
                 }
                 
-                // Cleanup the downloaded package file.
                 [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                 NSLog(@"[CurseForgeAPI] Finished queuing all downloads.");
             }];
