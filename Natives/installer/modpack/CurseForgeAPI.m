@@ -36,6 +36,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
+// Helper to find manifest.json recursively.
+- (NSString *)findManifestInDirectory:(NSString *)directory;
 @end
 
 @implementation CurseForgeAPI {
@@ -202,7 +204,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             return;
         }
         // Extract manifest.json from the archive.
-        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:(NSError **) &error];
+        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:(NSError * _Nullable *)&error];
         if (!manifestData) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(nil, error);
@@ -211,7 +213,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         }
         NSString *tempDir = NSTemporaryDirectory();
         NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
-        BOOL wroteFile = [manifestData writeToFile:tempManifestPath options:NSDataWritingAtomic error:(NSError **) &error];
+        BOOL wroteFile = [manifestData writeToFile:tempManifestPath options:NSDataWritingAtomic error:(NSError * _Nullable *)&error];
         if (!wroteFile) {
             NSError *writeError = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
                                                       code:-1
@@ -221,7 +223,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             });
             return;
         }
-        NSData *diskData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:(NSError **) &error];
+        NSData *diskData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:(NSError * _Nullable *)&error];
         [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
         if (!diskData) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -229,11 +231,23 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             });
             return;
         }
-        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:(NSError **) &error];
+        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:(NSError * _Nullable *)&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(manifestDict, error);
         });
     });
+}
+
+#pragma mark - Recursive Manifest Search
+
+- (NSString *)findManifestInDirectory:(NSString *)directory {
+    NSArray *subpaths = [[NSFileManager defaultManager] subpathsOfDirectoryAtPath:directory error:nil];
+    for (NSString *subpath in subpaths) {
+        if ([[subpath lastPathComponent] isEqualToString:@"manifest.json"]) {
+            return [directory stringByAppendingPathComponent:subpath];
+        }
+    }
+    return nil;
 }
 
 #pragma mark - Searching, Loading Details, Installing Modpacks
@@ -415,13 +429,13 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         extractSuccess = NO;
                         return;
                     }
-                    NSData *data = [archive extractData:fileInfo error:(NSError **) &err];
+                    NSData *data = [archive extractData:fileInfo error:(NSError * _Nullable *)&err];
                     if (!data) {
                         *stop = YES;
                         extractSuccess = NO;
                         return;
                     }
-                    BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:(NSError **) &err];
+                    BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:(NSError * _Nullable *)&err];
                     if (!written) {
                         *stop = YES;
                         extractSuccess = NO;
@@ -439,12 +453,23 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 return;
             }
             
-            // Now load the manifest from the extracted files.
+            // Try to load manifest from destPath/manifest.json.
             NSString *manifestPath = [destPath stringByAppendingPathComponent:@"manifest.json"];
+            if (![[NSFileManager defaultManager] fileExistsAtPath:manifestPath]) {
+                // If not found at the root, search recursively.
+                manifestPath = [weakSelf findManifestInDirectory:destPath];
+            }
+            if (!manifestPath) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [downloader finishDownloadWithErrorString:@"Manifest file not found in extracted files."];
+                });
+                return;
+            }
+            
             NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
             if (!manifestData) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [downloader finishDownloadWithErrorString:@"Manifest file not found in extracted files."];
+                    [downloader finishDownloadWithErrorString:@"Failed to load manifest file from extracted files."];
                 });
                 return;
             }
