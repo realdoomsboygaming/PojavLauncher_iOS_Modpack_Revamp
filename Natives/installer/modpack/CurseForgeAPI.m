@@ -191,6 +191,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 }
 
 #pragma mark - Manifest Extraction
+
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath
                              completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -207,6 +208,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         
         // If not found, search for manifest.json in any subdirectory.
         if (!manifestData) {
+            NSLog(@"[CurseForgeAPI] Manifest not found at root. Searching in subdirectories...");
             NSMutableArray *filenames = [NSMutableArray new];
             [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
                 if (fileInfo.filename) {
@@ -216,7 +218,10 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             for (NSString *filename in filenames) {
                 if ([[filename lastPathComponent] isEqualToString:@"manifest.json"]) {
                     manifestData = [archive extractDataFromFile:filename error:&error];
-                    if (manifestData) break;
+                    if (manifestData) {
+                        NSLog(@"[CurseForgeAPI] Found manifest at %@", filename);
+                        break;
+                    }
                 }
             }
         }
@@ -420,6 +425,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
             toPath:(NSString *)destPath {
+    NSLog(@"[CurseForgeAPI] Starting file extraction and download process.");
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @autoreleasepool {
