@@ -472,6 +472,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (components.count > 1 && [[components firstObject] caseInsensitiveCompare:modpackFolderName] == NSOrderedSame) {
                             relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
                         }
+                        
+                        // NEW: Ensure that all .jar files are placed inside the mods folder.
+                        if ([[relativePath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame) {
+                            if (![relativePath hasPrefix:@"mods/"]) {
+                                relativePath = [@"mods/" stringByAppendingString:relativePath];
+                            }
+                        }
+                        
                         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
                         
                         NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
@@ -538,7 +546,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
-                        // Fixed the format specifier here: changed %1$s to %1$@
                         NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
                         if (depTask) {
