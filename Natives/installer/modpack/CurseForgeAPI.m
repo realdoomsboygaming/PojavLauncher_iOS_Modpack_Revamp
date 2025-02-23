@@ -168,8 +168,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                         }
                     }
                 } else {
-                    NSLog(@"Fallback 'data' keys have unexpected types: id=%@, fileName=%@",
-                          idNumberObj, fileNameObj);
+                    NSLog(@"Fallback 'data' keys have unexpected types: id=%@, fileName=%@", idNumberObj, fileNameObj);
                 }
             } else {
                 NSLog(@"Fallback response 'data' is not a dictionary: %@", dataObj);
@@ -469,10 +468,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         // Determine the file's relative path.
                         NSString *relativePath = fileEntry[@"path"];
                         if (!relativePath || relativePath.length == 0) {
-                            relativePath = fileEntry[@"fileName"];
-                            if (!relativePath || relativePath.length == 0) {
+                            NSString *fileName = fileEntry[@"fileName"];
+                            if (fileName && [fileName hasSuffix:@".jar"]) {
+                                relativePath = [@"mods" stringByAppendingPathComponent:fileName];
+                            } else if (fileName && fileName.length > 0) {
+                                relativePath = fileName;
+                            } else {
                                 NSURL *dlURL = [NSURL URLWithString:url];
-                                relativePath = dlURL.lastPathComponent ?: [NSString stringWithFormat:@"%@.jar", fileID];
+                                relativePath = [@"mods" stringByAppendingPathComponent:(dlURL.lastPathComponent ?: [NSString stringWithFormat:@"%@.jar", fileID])];
                             }
                         }
                         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
