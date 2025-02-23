@@ -431,6 +431,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }
                 }
                 
+                // Note: Do not manually set downloader.progress.totalUnitCount here.
+                // Each download task adds its child progress to the parent.
+                
                 NSString *modpackName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 
                 // Process each unique file download.
@@ -511,7 +514,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 // After all file downloads have been submitted.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    // Force parent's progress to complete.
+                    // Force parent's progress to complete in case it's off by one.
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
@@ -542,7 +545,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         return;
                     }
                     
-                    // Remove the package zip.
+                    // Remove the package file.
                     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                     
                     // Process dependencies.
@@ -615,7 +618,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                     }
                     
-                    // Create a new profile (with gameDir set to "./<destPath.lastPathComponent>")
+                    // Create a new profile (gameDir set to "./<destPath.lastPathComponent>")
                     NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
                     if (profileName.length > 0) {
                         NSDictionary *profileInfo = @{
@@ -631,7 +634,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         });
                     }
                     
-                    // Auto-install the loader (Forge or Fabric)
+                    // Auto-install the loader (Forge or Fabric).
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([modLoaderId isEqualToString:@"forge"]) {
                             [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
@@ -699,91 +702,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     } else {
         NSLog(@"autoInstallFabric: Successfully wrote Fabric JSON at %@", jsonPath);
     }
-}
-
-#pragma mark - Prepare for Download
-
-- (void)prepareForDownload {
-    self.textProgress = [NSProgress new];
-    self.textProgress.kind = NSProgressKindFile;
-    self.textProgress.fileOperationKind = NSProgressFileOperationKindDownloading;
-    self.textProgress.totalUnitCount = 0;
-    
-    self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 0;
-    [self.fileList removeAllObjects];
-    [self.progressList removeAllObjects];
-}
-
-#pragma mark - Error Handling
-
-- (void)finishDownloadWithErrorString:(NSString *)error {
-    [self.progress cancel];
-    [self.manager invalidateSessionCancelingTasks:YES resetSession:YES];
-    showDialog(localize(@"Error", nil), error);
-    self.handleError();
-}
-
-- (void)finishDownloadWithError:(NSError *)error file:(NSString *)file {
-    NSString *errorStr = [NSString stringWithFormat:localize(@"launcher.mcl.error_download", NULL),
-                          file, error.localizedDescription];
-    NSLog(@"[MCDL] Error: %@ %@", errorStr, NSThread.callStackSymbols);
-    [self finishDownloadWithErrorString:errorStr];
-}
-
-#pragma mark - Access Check and SHA Validation
-
-- (BOOL)checkAccessWithDialog:(BOOL)show {
-    BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."]
-                   || (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
-    if (!accessible) {
-        [self.progress cancel];
-        if (show) {
-            [self finishDownloadWithErrorString:@"Minecraft can't be legally installed with a local account. Please switch to an online account."];
-        }
-    }
-    return accessible;
-}
-
-- (BOOL)checkSHAIgnorePref:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
-    if (sha.length == 0) {
-        BOOL existence = [NSFileManager.defaultManager fileExistsAtPath:path];
-        if (existence) {
-            NSLog(@"[MCDL] Warning: no SHA for %@, assuming okay", (altName ?: path.lastPathComponent));
-        }
-        return existence;
-    }
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    if (!data) {
-        NSLog(@"[MCDL] File does not exist for SHA check: %@", altName ?: path.lastPathComponent);
-        return NO;
-    }
-    unsigned char digest[CC_SHA1_DIGEST_LENGTH];
-    CC_SHA1(data.bytes, (CC_LONG)data.length, digest);
-    NSMutableString *localSHA = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
-    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
-        [localSHA appendFormat:@"%02x", digest[i]];
-    }
-    BOOL check = [sha isEqualToString:localSHA];
-    if (!check || (getPrefBool(@"general.debug_logging") && logSuccess)) {
-        NSLog(@"[MCDL] SHA1 %@ for %@ (expected: %@, got: %@)",
-              check ? @"passed" : @"failed",
-              (altName ?: path.lastPathComponent),
-              sha, localSHA);
-    }
-    return check;
-}
-
-- (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
-    if (getPrefBool(@"general.check_sha")) {
-        return [self checkSHAIgnorePref:sha forFile:path altName:altName logSuccess:logSuccess];
-    } else {
-        return [NSFileManager.defaultManager fileExistsAtPath:path];
-    }
-}
-
-- (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName {
-    return [self checkSHA:sha forFile:path altName:altName logSuccess:(altName == nil)];
 }
 
 #pragma mark - Manifest Verification
