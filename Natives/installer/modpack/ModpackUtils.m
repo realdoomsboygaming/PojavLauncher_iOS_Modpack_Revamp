@@ -5,10 +5,16 @@
 
 + (void)archive:(UZKArchive *)archive extractDirectory:(NSString *)dir toPath:(NSString *)path error:(NSError *__autoreleasing *)error {
     [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
-        if (![fileInfo.filename hasPrefix:dir] || fileInfo.filename.length <= dir.length) {
-            return;
+        NSString *fileName = nil;
+        if (dir.length == 0) {
+            // If no directory is specified, use the full filename.
+            fileName = fileInfo.filename;
+        } else {
+            if (![fileInfo.filename hasPrefix:dir] || fileInfo.filename.length <= dir.length) {
+                return;
+            }
+            fileName = [fileInfo.filename substringFromIndex:dir.length+1];
         }
-        NSString *fileName = [fileInfo.filename substringFromIndex:dir.length+1];
         NSString *destItemPath = [path stringByAppendingPathComponent:fileName];
         NSString *destDirPath = fileInfo.isDirectory ? destItemPath : destItemPath.stringByDeletingLastPathComponent;
         BOOL createdDir = [[NSFileManager defaultManager] createDirectoryAtPath:destDirPath
