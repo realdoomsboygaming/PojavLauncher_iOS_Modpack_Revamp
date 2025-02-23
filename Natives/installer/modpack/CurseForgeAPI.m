@@ -201,7 +201,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             });
             return;
         }
-        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
+        // Extract manifest.json from the archive.
+        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:(NSError **) &error];
         if (!manifestData) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(nil, error);
@@ -210,7 +211,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         }
         NSString *tempDir = NSTemporaryDirectory();
         NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
-        BOOL wroteFile = [manifestData writeToFile:tempManifestPath atomically:YES];
+        BOOL wroteFile = [manifestData writeToFile:tempManifestPath options:NSDataWritingAtomic error:(NSError **) &error];
         if (!wroteFile) {
             NSError *writeError = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
                                                       code:-1
@@ -220,7 +221,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             });
             return;
         }
-        NSData *diskData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:&error];
+        NSData *diskData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:(NSError **) &error];
         [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
         if (!diskData) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -228,7 +229,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             });
             return;
         }
-        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:&error];
+        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:(NSError **) &error];
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(manifestDict, error);
         });
@@ -414,13 +415,13 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         extractSuccess = NO;
                         return;
                     }
-                    NSData *data = [archive extractData:fileInfo error:&err];
+                    NSData *data = [archive extractData:fileInfo error:(NSError **) &err];
                     if (!data) {
                         *stop = YES;
                         extractSuccess = NO;
                         return;
                     }
-                    BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:&err];
+                    BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:(NSError **) &err];
                     if (!written) {
                         *stop = YES;
                         extractSuccess = NO;
