@@ -36,6 +36,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
+// NEW: Move all downloaded .jar files to the mods folder.
+- (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
 @end
 
 @implementation CurseForgeAPI {
@@ -234,6 +236,40 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             completion(manifestDict, error);
         });
     });
+}
+
+#pragma mark - Helper: Move .jar Files to Mods Folder
+
+- (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *modsDir = [destPath stringByAppendingPathComponent:@"mods"];
+    if (![fileManager fileExistsAtPath:modsDir]) {
+        NSError *createError = nil;
+        [fileManager createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:&createError];
+        if (createError) {
+            NSLog(@"Error creating mods directory: %@", createError);
+            return;
+        }
+    }
+    NSDirectoryEnumerator *enumerator = [fileManager enumeratorAtPath:destPath];
+    for (NSString *item in enumerator) {
+        NSString *fullPath = [destPath stringByAppendingPathComponent:item];
+        BOOL isDirectory = NO;
+        [fileManager fileExistsAtPath:fullPath isDirectory:&isDirectory];
+        // If it's a file with a .jar extension and not already inside mods/...
+        if (!isDirectory && [[fullPath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame) {
+            if (![item hasPrefix:@"mods/"]) {
+                NSString *destJarPath = [modsDir stringByAppendingPathComponent:[item lastPathComponent]];
+                NSError *moveError = nil;
+                [fileManager moveItemAtPath:fullPath toPath:destJarPath error:&moveError];
+                if (moveError) {
+                    NSLog(@"Error moving jar file %@: %@", fullPath, moveError);
+                } else {
+                    NSLog(@"Moved %@ to %@", fullPath, destJarPath);
+                }
+            }
+        }
+    }
 }
 
 #pragma mark - Searching, Loading Details, Installing Modpacks
@@ -472,6 +508,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (components.count > 1 && [[components firstObject] caseInsensitiveCompare:modpackFolderName] == NSOrderedSame) {
                             relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
                         }
+                        
                         NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
                         
                         NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
@@ -485,11 +522,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                                                                        toPath:destinationPath];
                             if (task) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
-                                    @synchronized(downloader.fileList) {
-                                        if (![downloader.fileList containsObject:relativePath]) {
-                                            [downloader.fileList addObject:relativePath];
-                                        }
-                                    }
+                                    // createDownloadTask handles fileList addition so no extra addition here.
                                     NSLog(@"Starting download for %@", relativePath);
                                     [task resume];
                                 });
@@ -512,6 +545,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
+                        // NEW: After downloads complete, move all .jar files to the mods folder.
+                        [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
                     });
                     
                     NSError *archiveError = nil;
@@ -538,7 +573,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
-                        // Fixed the format specifier here: changed %1$s to %1$@
                         NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
                         if (depTask) {
