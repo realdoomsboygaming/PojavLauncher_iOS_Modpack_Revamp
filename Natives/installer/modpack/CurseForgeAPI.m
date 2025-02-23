@@ -203,13 +203,28 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             });
             return;
         }
+        // First attempt: try extracting "manifest.json" at the root.
         NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
+        
+        // If not found, search for manifest.json in any subdirectory.
+        if (!manifestData) {
+            NSArray *filenames = [archive listFilenamesWithError:&error];
+            for (NSString *filename in filenames) {
+                if ([[filename lastPathComponent] isEqualToString:@"manifest.json"]) {
+                    manifestData = [archive extractDataFromFile:filename error:&error];
+                    if (manifestData) break;
+                }
+            }
+        }
+        
         if (!manifestData) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(nil, error);
             });
             return;
         }
+        
+        // Write the manifest data to a temporary file to parse it.
         NSString *tempDir = NSTemporaryDirectory();
         NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
         BOOL wroteFile = [manifestData writeToFile:tempManifestPath options:NSDataWritingAtomic error:&error];
@@ -236,6 +251,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         });
     });
 }
+
 
 #pragma mark - Recursive Manifest Search
 
