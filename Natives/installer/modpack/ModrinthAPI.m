@@ -92,18 +92,33 @@
 
     // Ensure unique file paths are counted
     NSArray *filesArray = indexDict[@"files"];
-    NSSet *uniqueFiles = [NSSet setWithArray:[filesArray valueForKey:@"path"]];
-    downloader.progress.totalUnitCount = uniqueFiles.count;
+    NSMutableSet *processedFiles = [NSMutableSet new]; // Track unique files
+    downloader.progress.totalUnitCount = 0;
 
     for (NSDictionary *indexFile in filesArray) {
+        NSString *filePath = indexFile[@"path"] ?: @"";
+        
+        // Skip if file has already been processed
+        if ([processedFiles containsObject:filePath]) {
+            NSLog(@"[ModrinthAPI] Skipping duplicate file: %@", filePath);
+            continue;
+        }
+        
+        [processedFiles addObject:filePath]; // Mark file as processed
+        downloader.progress.totalUnitCount++; // Only count unique files
+
         NSString *url = [indexFile[@"downloads"] firstObject] ?: @"";
         NSString *sha = indexFile[@"hashes"][@"sha1"] ?: @"";
-        NSString *path = [destPath stringByAppendingPathComponent:indexFile[@"path"] ?: @""];
+        NSString *path = [destPath stringByAppendingPathComponent:filePath];
         NSUInteger size = [indexFile[@"fileSize"] unsignedLongLongValue];
 
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:size sha:sha altName:nil toPath:path];
         if (task) {
-            [downloader.fileList addObject:indexFile[@"path"] ?: @""];
+            @synchronized(downloader.fileList) {
+                if (![downloader.fileList containsObject:filePath]) {
+                    [downloader.fileList addObject:filePath];
+                }
+            }
             [task resume];
         } else if (!downloader.progress.cancelled) {
             downloader.progress.completedUnitCount++;
