@@ -553,8 +553,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", extractError.localizedDescription]];
                             return;
                         }
-                        // Use ModpackUtils extraction function with an empty directory string to dump all files.
-                        if (![ModpackUtils archive:archive2 extractDirectory:@"" toPath:destPath error:&extractError]) {
+                        // Instead of calling a non-existent unzip method, use the ModpackUtils extraction method.
+                        [ModpackUtils archive:archive2 extractDirectory:@"" toPath:destPath error:&extractError];
+                        if (extractError != nil) {
                             NSLog(@"Failed to extract modpack contents: %@", extractError.localizedDescription);
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract modpack contents: %@", extractError.localizedDescription]];
                             return;
