@@ -329,8 +329,8 @@
     
     NSURLSessionDownloadTask *task =
         [self createDownloadTask:url size:size sha:sha altName:nil toPath:packagePath success:^{
-            // Updated destinationPath with proper conversion of the getenv result and usage of both arguments
-            NSString *destinationPath = [NSString stringWithFormat:@"./%@/%@", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], name];
+            NSString *destinationPath =
+                [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
             [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
         }];
     [task resume];
@@ -344,7 +344,7 @@
     self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 1;
+    self.progress.totalUnitCount = 1; // a "fake" unit to avoid immediate completion
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
