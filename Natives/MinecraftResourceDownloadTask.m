@@ -55,8 +55,7 @@
             NSLog(@"[MCDL] Downloading %@", name);
             [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
                                     withIntermediateDirectories:YES
-                                                     attributes:nil
-                                                          error:nil];
+                                                     attributes:nil error:nil];
             [NSFileManager.defaultManager removeItemAtPath:path error:nil];
             return [NSURL fileURLWithPath:path];
         }
@@ -83,8 +82,9 @@
     
     // If a valid task was created, let's add it to our overall progress
     if (task) {
-        // Set up per-file progress as 1 unit
         childProgress = [self.manager downloadProgressForTask:task];
+        // Set the progress total to the actual file size (in bytes)
+        childProgress.totalUnitCount = size;
         [self addChildProgress:childProgress];
         
         // Avoid duplicates in fileList
@@ -113,17 +113,11 @@
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
-// Just set each file as 1 progress unit
+// Updated addChildProgress method that uses the actual file size for progress.
 - (void)addChildProgress:(NSProgress *)childProgress {
-    // We'll treat each file as 1 "unit" so progress is measured in # of files
     childProgress.kind = NSProgressKindFile;
-    childProgress.totalUnitCount = 1;
-    
-    // Add to our main progress
-    [self.progress addChild:childProgress withPendingUnitCount:1];
-    self.progress.totalUnitCount += 1;
-    
-    // Mirror the total in textProgress
+    [self.progress addChild:childProgress withPendingUnitCount:childProgress.totalUnitCount];
+    self.progress.totalUnitCount += childProgress.totalUnitCount;
     self.textProgress.totalUnitCount = self.progress.totalUnitCount;
 }
 
