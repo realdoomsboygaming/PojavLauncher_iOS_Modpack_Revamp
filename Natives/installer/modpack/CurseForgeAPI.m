@@ -457,9 +457,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         continue;
                     }
                     
-                    NSString *url = [NSString stringWithFormat:@"https://media.forgecdn.net/files/%@/%@", [fileID substringToIndex:(fileID.length - 3)], fileID];
-                    NSString *fileName = [NSString stringWithFormat:@"mods/%@", fileEntry[@"fileName"]];
-                    NSString *filePath = [destPath stringByAppendingPathComponent:fileName];
+                    NSString *downloadFileName = fileEntry[@"fileName"];
+                    if (!downloadFileName.length) {
+                        NSLog(@"[CurseForgeAPI] WARNING: Skipping file with missing fileName.");
+                        continue;
+                    }
+                    
+                    // Construct URL using fileID and fileName.
+                    NSString *url = [NSString stringWithFormat:@"https://media.forgecdn.net/files/%@/%@/%@", [fileID substringToIndex:(fileID.length - 3)], fileID, downloadFileName];
+                    
+                    NSString *filePath = [destPath stringByAppendingPathComponent:[NSString stringWithFormat:@"mods/%@", downloadFileName]];
                     
                     NSLog(@"[CurseForgeAPI] Queuing download: %@ -> %@", url, filePath);
                     
@@ -471,10 +478,11 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     if (task) {
                         [task resume];
                     } else {
-                        NSLog(@"[CurseForgeAPI] ERROR: Failed to create download task for %@", fileName);
+                        NSLog(@"[CurseForgeAPI] ERROR: Failed to create download task for %@", downloadFileName);
                     }
                 }
                 
+                // Cleanup the package file.
                 [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                 NSLog(@"[CurseForgeAPI] Finished queuing all downloads.");
             }];
