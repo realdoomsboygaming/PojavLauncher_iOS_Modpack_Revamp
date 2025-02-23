@@ -193,50 +193,14 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 #pragma mark - Manifest Extraction
 
-// (This method remains available in case it is needed elsewhere.)
-- (void)asyncExtractManifestFromPackage:(NSString *)packagePath
-                             completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSError *error = nil;
-        UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
-        if (!archive) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, error);
-            });
-            return;
-        }
-        NSData *manifestData = [archive extractDataFromFile:@"manifest.json" error:&error];
-        if (!manifestData) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, error);
-            });
-            return;
-        }
-        NSString *tempDir = NSTemporaryDirectory();
-        NSString *tempManifestPath = [tempDir stringByAppendingPathComponent:@"manifest.json"];
-        BOOL wroteFile = [manifestData writeToFile:tempManifestPath atomically:YES];
-        if (!wroteFile) {
-            NSError *writeError = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
-                                                      code:-1
-                                                  userInfo:@{NSLocalizedDescriptionKey: @"Failed to write manifest to disk"}];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, writeError);
-            });
-            return;
-        }
-        NSData *diskData = [NSData dataWithContentsOfFile:tempManifestPath options:0 error:&error];
-        [[NSFileManager defaultManager] removeItemAtPath:tempManifestPath error:nil];
-        if (!diskData) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(nil, error);
-            });
-            return;
-        }
-        NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:diskData options:0 error:&error];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            completion(manifestDict, error);
-        });
-    });
+// We no longer use asyncExtractManifestFromPackage: to extract the manifest from the zip,
+// since we now extract the entire zip into destPath first.
+- (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error {
+    NSString *manifestPath = [destPath stringByAppendingPathComponent:@"manifest.json"];
+    NSData *data = [NSData dataWithContentsOfFile:manifestPath options:0 error:error];
+    if (!data) return nil;
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
+    return manifest;
 }
 
 #pragma mark - Helper: Move .jar Files to Mods Folder
@@ -273,7 +237,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     }
 }
 
-#pragma mark - New Order: Extraction, Manifest, then Downloads
+#pragma mark - New Order: Extraction, then Manifest, then Downloads
 
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
 submitDownloadTasksFromPackage:(NSString *)packagePath
@@ -291,18 +255,29 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 });
                 return;
             }
-            // Use UnzipKit's inflateToDestination:error: if available.
-            if (![archive inflateToDestination:destPath error:&extractError]) {
+            // Use UnzipKit's performOnFilesInArchive: to extract all files.
+            // Here we iterate over all files and write them out.
+            [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
+                NSString *destItemPath = [destPath stringByAppendingPathComponent:fileInfo.filename];
+                if (fileInfo.isDirectory) {
+                    [[NSFileManager defaultManager] createDirectoryAtPath:destItemPath withIntermediateDirectories:YES attributes:nil error:nil];
+                } else {
+                    NSData *data = [archive extractData:fileInfo error:&extractError];
+                    if (data) {
+                        [data writeToFile:destItemPath options:NSDataWritingAtomic error:&extractError];
+                    }
+                }
+            } error:&extractError];
+            if (extractError) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    NSLog(@"Failed to extract modpack contents: %@", extractError.localizedDescription);
+                    NSLog(@"Extraction failed: %@", extractError.localizedDescription);
                     [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract modpack contents: %@", extractError.localizedDescription]];
                 });
                 return;
             }
             
-            // Step 2: Load manifest from the extracted files.
-            NSString *manifestPath = [destPath stringByAppendingPathComponent:@"manifest.json"];
-            NSDictionary *manifestDict = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:manifestPath] options:0 error:&extractError];
+            // Step 2: Load manifest from extracted files.
+            NSDictionary *manifestDict = [weakSelf loadManifestFromDestination:destPath error:&extractError];
             if (!manifestDict) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [downloader finishDownloadWithErrorString:@"Manifest not found in extracted files."];
@@ -341,7 +316,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
                                              fileID:[fileID unsignedLongLongValue]
                                          completion:^(NSString *url, NSError *error) {
-                    // If file already exists at destination, createDownloadTask will simply not create a task.
                     if (!url && required) {
                         dispatch_async(dispatch_get_main_queue(), ^{
                             NSString *modName = fileEntry[@"fileName"] ?: @"UnknownFile";
@@ -416,7 +390,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                 });
                 
-                // Dependency download and profile creation (unchanged):
+                // Dependency download and profile creation.
                 NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                 if (depInfo[@"json"]) {
                     NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
