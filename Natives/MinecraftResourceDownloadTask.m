@@ -12,6 +12,7 @@
 
 @interface MinecraftResourceDownloadTask ()
 @property (nonatomic, strong) AFURLSessionManager *manager;
+// No need to declare checkSHA:forFile:altName: here because it's implemented below.
 @end
 
 @implementation MinecraftResourceDownloadTask
@@ -35,13 +36,8 @@
                                             sha:(NSString *)sha
                                         altName:(NSString *)altName
                                           toPath:(NSString *)path
-                                        success:(void(^)(void))success {
-    if (url.length == 0) {
-        NSLog(@"[MCDL] Skipping download task for file with empty URL.");
-        if (success) success();
-        return nil;
-    }
-    
+                                        success:(void(^)(void))success
+{
     BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
     if (fileExists && [self checkSHA:sha forFile:path altName:altName]) {
         if (success) success();
@@ -65,7 +61,8 @@
             [NSFileManager.defaultManager removeItemAtPath:path error:nil];
             return [NSURL fileURLWithPath:path];
         }
-        completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
+        completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error)
+        {
             if (self.progress.cancelled) {
                 // If cancelled, ignore errors.
             } else if (error != nil) {
@@ -128,7 +125,8 @@
                                            size:(NSUInteger)size
                                             sha:(NSString *)sha
                                         altName:(NSString *)altName
-                                          toPath:(NSString *)path {
+                                          toPath:(NSString *)path
+{
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
@@ -328,7 +326,8 @@
 // For modpacks from an API
 - (void)downloadModpackFromAPI:(ModpackAPI *)api
                          detail:(NSDictionary *)modDetail
-                        atIndex:(NSUInteger)selectedVersion {
+                        atIndex:(NSUInteger)selectedVersion
+{
     [self prepareForDownload];
     
     NSString *url = modDetail[@"versionUrls"][selectedVersion];
@@ -426,6 +425,11 @@
     } else {
         return [NSFileManager.defaultManager fileExistsAtPath:path];
     }
+}
+
+// Convenience method for checkSHA:forFile:altName: (without logSuccess parameter)
+- (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName {
+    return [self checkSHA:sha forFile:path altName:altName logSuccess:(altName == nil)];
 }
 
 @end
