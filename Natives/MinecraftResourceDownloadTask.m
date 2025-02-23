@@ -341,10 +341,10 @@
     self.textProgress = [NSProgress new];
     self.textProgress.kind = NSProgressKindFile;
     self.textProgress.fileOperationKind = NSProgressFileOperationKindDownloading;
-    self.textProgress.totalUnitCount = 0;
+    self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 0;
+    self.progress.totalUnitCount = 1;
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
