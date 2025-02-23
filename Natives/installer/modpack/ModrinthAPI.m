@@ -97,6 +97,10 @@
 
     for (NSDictionary *indexFile in filesArray) {
         NSString *filePath = indexFile[@"path"] ?: @"";
+        if (filePath.length == 0) {
+            NSLog(@"[ModrinthAPI] Skipping file with empty path.");
+            continue;
+        }
         
         // Skip if file has already been processed
         if ([processedFiles containsObject:filePath]) {
