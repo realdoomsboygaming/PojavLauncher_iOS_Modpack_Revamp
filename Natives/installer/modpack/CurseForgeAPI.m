@@ -545,7 +545,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
                         
-                        // NEW: Extract entire modpack zip into destPath (dump everything)
+                        // NEW: Instead of extracting only "overrides", extract the entire modpack zip.
                         NSError *extractError = nil;
                         UZKArchive *archive2 = [[UZKArchive alloc] initWithPath:packagePath error:&extractError];
                         if (!archive2) {
@@ -553,13 +553,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to reopen archive: %@", extractError.localizedDescription]];
                             return;
                         }
-                        if (![archive2 unzipFileToDestination:destPath error:&extractError]) {
+                        // Use ModpackUtils extraction function with an empty directory string to dump all files.
+                        if (![ModpackUtils archive:archive2 extractDirectory:@"" toPath:destPath error:&extractError]) {
                             NSLog(@"Failed to extract modpack contents: %@", extractError.localizedDescription);
                             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract modpack contents: %@", extractError.localizedDescription]];
                             return;
                         }
                         
-                        // NEW: After extracting, move all .jar files to the mods folder.
+                        // NEW: After extraction, move all .jar files to the mods folder.
                         [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
                         
                         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
