@@ -330,7 +330,7 @@
     NSURLSessionDownloadTask *task =
         [self createDownloadTask:url size:size sha:sha altName:nil toPath:packagePath success:^{
             NSString *destinationPath =
-                [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
+                [NSString stringWithFormat:@"./%@", getenv("POJAV_GAME_DIR"), name];
             [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
         }];
     [task resume];
