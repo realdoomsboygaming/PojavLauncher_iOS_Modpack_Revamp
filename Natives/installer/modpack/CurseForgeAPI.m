@@ -38,6 +38,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
 // NEW: Move all downloaded .jar files to the mods folder.
 - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
+// New helper to load the manifest from the extracted files.
+- (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error;
 @end
 
 @implementation CurseForgeAPI {
@@ -63,7 +65,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     
-    // Use API key if available.
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -137,14 +138,12 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 - (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID
                                      fileID:(unsigned long long)fileID
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion {
-    // Build direct fallback URL.
     NSString *fallbackUrl = [NSString stringWithFormat:
         @"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
     if (self.apiKey && self.apiKey.length > 0) {
         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", self.apiKey];
     }
     
-    // Attempt to build a media.forgecdn.net link from metadata.
     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     [self getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
         NSLog(@"Fallback response: %@", fallbackResponse);
@@ -193,8 +192,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 #pragma mark - Manifest Extraction
 
-// We no longer use asyncExtractManifestFromPackage: to extract the manifest from the zip,
-// since we now extract the entire zip into destPath first.
+// New helper: load the manifest from the extracted files.
 - (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error {
     NSString *manifestPath = [destPath stringByAppendingPathComponent:@"manifest.json"];
     NSData *data = [NSData dataWithContentsOfFile:manifestPath options:0 error:error];
@@ -221,7 +219,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         NSString *fullPath = [destPath stringByAppendingPathComponent:item];
         BOOL isDirectory = NO;
         [fileManager fileExistsAtPath:fullPath isDirectory:&isDirectory];
-        // If it's a file with a .jar extension and not already inside mods/...
         if (!isDirectory && [[fullPath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame) {
             if (![item hasPrefix:@"mods/"]) {
                 NSString *destJarPath = [modsDir stringByAppendingPathComponent:[item lastPathComponent]];
@@ -255,16 +252,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 });
                 return;
             }
-            // Use UnzipKit's performOnFilesInArchive: to extract all files.
-            // Here we iterate over all files and write them out.
+            // Instead of using a non-existent inflateToDestination:, we use performOnFilesInArchive:
             [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
                 NSString *destItemPath = [destPath stringByAppendingPathComponent:fileInfo.filename];
                 if (fileInfo.isDirectory) {
                     [[NSFileManager defaultManager] createDirectoryAtPath:destItemPath withIntermediateDirectories:YES attributes:nil error:nil];
                 } else {
-                    NSData *data = [archive extractData:fileInfo error:&extractError];
+                    NSError *localError = nil;
+                    NSData *data = [archive extractData:fileInfo error:&localError];
                     if (data) {
-                        [data writeToFile:destItemPath options:NSDataWritingAtomic error:&extractError];
+                        [data writeToFile:destItemPath options:NSDataWritingAtomic error:&localError];
                     }
                 }
             } error:&extractError];
@@ -340,7 +337,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             relativePath = dlURL.lastPathComponent ?: [NSString stringWithFormat:@"%@.jar", fileID];
                         }
                     }
-                    // Remove duplicate modpack folder if present.
                     NSArray *components = [relativePath pathComponents];
                     if (components.count > 1 && [[components firstObject] caseInsensitiveCompare:modpackFolderName] == NSOrderedSame) {
                         relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
@@ -377,7 +373,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 }];
             }
             
-            // Step 4: After downloads complete, finalize.
+            // Step 4: Finalize after downloads.
             dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 dispatch_async(dispatch_get_main_queue(), ^{
                     downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
@@ -393,7 +389,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 // Dependency download and profile creation.
                 NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                 if (depInfo[@"json"]) {
-                    NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
+                    NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json",
+                                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                                          depInfo[@"id"]];
                     NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
                     if (depTask) {
                         dispatch_async(dispatch_get_main_queue(), ^{
@@ -451,7 +449,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                 }
                 
-                // Fixed profile gameDir: include "custom_gamedir" in the path.
                 NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 if (profileName.length > 0) {
                     NSDictionary *profileInfo = @{
@@ -481,6 +478,28 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     });
 }
 
+#pragma mark - Stub Implementations for Header Methods
+
+- (void)searchModWithFilters:(NSDictionary *)searchFilters
+         previousPageResult:(NSMutableArray *)prevResult
+                 completion:(void (^)(NSMutableArray *results, NSError *error))completion {
+    // Stub implementation.
+    if (completion) completion(nil, nil);
+}
+
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item
+              completion:(void (^)(NSError *error))completion {
+    // Stub implementation.
+    if (completion) completion(nil);
+}
+
+- (void)installModpackFromDetail:(NSDictionary *)modDetail
+                         atIndex:(NSUInteger)selectedVersion
+                      completion:(void (^)(NSError *error))completion {
+    // Stub implementation.
+    if (completion) completion(nil);
+}
+
 #pragma mark - Helper: Auto-install Loader
 
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer {
@@ -488,9 +507,11 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSLog(@"autoInstallForge: Missing version information.");
         return;
     }
-    // Build final ID (e.g., "1.19.2-forge-43.1.1")
     NSString *finalId = [NSString stringWithFormat:@"%@-forge-%@", vanillaVer, forgeVer];
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], finalId, finalId];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
+                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                          finalId,
+                          finalId];
     
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES
@@ -516,7 +537,10 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSLog(@"autoInstallFabric: Missing fabric version string.");
         return;
     }
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], fabricString, fabricString];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
+                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                          fabricString,
+                          fabricString];
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES
                                                attributes:nil
