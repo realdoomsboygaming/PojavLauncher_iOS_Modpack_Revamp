@@ -207,14 +207,12 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         
         // If not found, search for manifest.json in any subdirectory.
         if (!manifestData) {
-            // Use the fileInfoList method to obtain all file infos.
-            NSArray *fileInfos = [archive fileInfoList:&error];
             NSMutableArray *filenames = [NSMutableArray new];
-            for (UZKFileInfo *info in fileInfos) {
-                if (info.filename) {
-                    [filenames addObject:info.filename];
+            [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
+                if (fileInfo.filename) {
+                    [filenames addObject:fileInfo.filename];
                 }
-            }
+            } error:&error];
             for (NSString *filename in filenames) {
                 if ([[filename lastPathComponent] isEqualToString:@"manifest.json"]) {
                     manifestData = [archive extractDataFromFile:filename error:&error];
@@ -257,8 +255,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         });
     });
 }
-
-
 
 #pragma mark - Recursive Manifest Search
 
