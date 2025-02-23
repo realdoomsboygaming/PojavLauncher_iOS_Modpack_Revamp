@@ -191,7 +191,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 }
 
 #pragma mark - Manifest Extraction
-
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath
                              completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -208,7 +207,14 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         
         // If not found, search for manifest.json in any subdirectory.
         if (!manifestData) {
-            NSArray *filenames = [archive listFilenamesWithError:&error];
+            // Use the fileInfoList method to obtain all file infos.
+            NSArray *fileInfos = [archive fileInfoList:&error];
+            NSMutableArray *filenames = [NSMutableArray new];
+            for (UZKFileInfo *info in fileInfos) {
+                if (info.filename) {
+                    [filenames addObject:info.filename];
+                }
+            }
             for (NSString *filename in filenames) {
                 if ([[filename lastPathComponent] isEqualToString:@"manifest.json"]) {
                     manifestData = [archive extractDataFromFile:filename error:&error];
@@ -251,6 +257,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         });
     });
 }
+
 
 
 #pragma mark - Recursive Manifest Search
