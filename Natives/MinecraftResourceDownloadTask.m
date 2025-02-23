@@ -45,6 +45,7 @@
         return nil;
     }
     
+    // Use altName if provided, otherwise use the file name from the path.
     NSString *name = altName ?: path.lastPathComponent;
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
     
@@ -80,16 +81,31 @@
         }
     ];
     
-    // If a valid task was created, let's add it to our overall progress
+    // If a valid task was created, add it to our overall progress and file list.
     if (task) {
         childProgress = [self.manager downloadProgressForTask:task];
         // Set the progress total to the actual file size (in bytes)
         childProgress.totalUnitCount = size;
         [self addChildProgress:childProgress];
         
-        // Avoid duplicates in fileList
+        // Normalize the file name for duplicate checking.
+        NSString *normalizedName = name;
+        if ([normalizedName hasPrefix:@"mods/"]) {
+            normalizedName = [normalizedName substringFromIndex:5];
+        }
+        BOOL duplicate = NO;
         @synchronized(self.fileList) {
-            if (![self.fileList containsObject:name]) {
+            for (NSString *existing in self.fileList) {
+                NSString *normalizedExisting = existing;
+                if ([normalizedExisting hasPrefix:@"mods/"]) {
+                    normalizedExisting = [normalizedExisting substringFromIndex:5];
+                }
+                if ([normalizedExisting isEqualToString:normalizedName]) {
+                    duplicate = YES;
+                    break;
+                }
+            }
+            if (!duplicate) {
                 [self.fileList addObject:name];
             }
         }
