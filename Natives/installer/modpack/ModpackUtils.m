@@ -7,7 +7,6 @@
     [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
         NSString *fileName = nil;
         if (dir.length == 0) {
-            // If no directory is specified, use the full filename.
             fileName = fileInfo.filename;
         } else {
             if (![fileInfo.filename hasPrefix:dir] || fileInfo.filename.length <= dir.length) {
@@ -33,6 +32,23 @@
             NSLog(@"[ModpackDL] Extracted %@", fileInfo.filename);
         }
     } error:error];
+}
+
++ (void)extractArchiveAtPath:(NSString *)archivePath toDestination:(NSString *)destPath completion:(void (^)(NSError *error))completion {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSError *error = nil;
+        UZKArchive *archive = [[UZKArchive alloc] initWithPath:archivePath error:&error];
+        if (!archive) {
+            if (completion) {
+                completion(error);
+            }
+            return;
+        }
+        [self archive:archive extractDirectory:@"" toPath:destPath error:&error];
+        if (completion) {
+            completion(error);
+        }
+    });
 }
 
 + (NSDictionary *)infoForDependencies:(NSDictionary *)dependency {
