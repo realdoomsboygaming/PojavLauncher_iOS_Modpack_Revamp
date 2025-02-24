@@ -12,7 +12,7 @@
 
 @interface MinecraftResourceDownloadTask ()
 @property (nonatomic, strong) AFURLSessionManager *manager;
-// No need to declare checkSHA:forFile:altName: here because it's implemented below.
+@property (nonatomic, assign) NSUInteger activeDownloads; // Active downloads counter
 @end
 
 @implementation MinecraftResourceDownloadTask
@@ -26,6 +26,7 @@
         self.manager = [[AFURLSessionManager alloc] initWithSessionConfiguration:configuration];
         self.fileList = [NSMutableArray new];
         self.progressList = [NSMutableArray new];
+        self.activeDownloads = 0;
     }
     return self;
 }
@@ -50,11 +51,15 @@
     NSString *name = altName ?: path.lastPathComponent;
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
     
+    // Increase active downloads counter
+    self.activeDownloads++;
+    
     __block NSProgress *childProgress = nil;
     NSURLSessionDownloadTask *task = [self.manager downloadTaskWithRequest:request
         progress:nil
         destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
             NSLog(@"[MCDL] Downloading %@", name);
+            // Ensure the destination directory exists
             [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
                                     withIntermediateDirectories:YES
                                                      attributes:nil error:nil];
@@ -63,6 +68,17 @@
         }
         completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error)
         {
+            // Decrease active downloads counter when task finishes
+            self.activeDownloads--;
+            
+            // If only one file remains active, trigger finalization.
+            if (self.activeDownloads == 1) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSLog(@"[MCDL] Only one file remaining, proceeding to finalization.");
+                    [self finalizeDownloads];
+                });
+            }
+            
             if (self.progress.cancelled) {
                 // If cancelled, ignore errors.
             } else if (error != nil) {
@@ -151,7 +167,7 @@
                       getenv("POJAV_GAME_DIR"), versionStr];
     version = (id)[MinecraftResourceUtils findVersion:versionStr inList:remoteVersionList];
     
-    void(^completionBlock)(void) = ^{
+    void(^completionBlock)(void) = ^ {
         self.metadata = parseJSONFromFile(path);
         if (self.metadata[@"NSErrorObject"]) {
             [self finishDownloadWithErrorString:[self.metadata[@"NSErrorObject"] localizedDescription]];
@@ -246,7 +262,7 @@
         NSUInteger size = [artifact[@"size"] unsignedLongLongValue];
         NSString *url = artifact[@"url"];
         if ([library[@"skip"] boolValue]) {
-            NSLog(@"[MDCL] Skipped library %@", name);
+            NSLog(@"[MCDL] Skipped library %@", name);
             continue;
         }
         
@@ -306,9 +322,7 @@
         [self downloadAssetMetadataWithSuccess:^{
             NSArray *libTasks = [self downloadClientLibraries];
             NSArray *assetTasks = [self downloadClientAssets];
-            // Adjust the initial "fake byte"
-            self.progress.totalUnitCount--;
-            self.textProgress.totalUnitCount--;
+            // Remove the fake byte workaround entirely. The totalUnitCount is dynamically built.
             if (self.progress.totalUnitCount == 0) {
                 self.progress.totalUnitCount = 1;
                 self.progress.completedUnitCount = 1;
@@ -333,9 +347,9 @@
     NSString *url = modDetail[@"versionUrls"][selectedVersion];
     NSUInteger size = [modDetail[@"versionSizes"][selectedVersion] unsignedLongLongValue];
     NSString *sha = modDetail[@"versionHashes"][selectedVersion];
-    NSString *name = [[[modDetail[@"title"] lowercaseString]
-                       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
-                      stringByReplacingOccurrencesOfString:@" " withString:@"_"];
+    NSString *name = [[[[modDetail[@"title"] lowercaseString]
+                        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
+                       stringByReplacingOccurrencesOfString:@" " withString:@"_"] copy];
     NSString *packagePath = [NSTemporaryDirectory() stringByAppendingFormat:@"/%@.zip", name];
     
     NSURLSessionDownloadTask *task =
@@ -355,7 +369,7 @@
     self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 1; // a "fake" unit to avoid immediate completion
+    self.progress.totalUnitCount = 0; // No fake unit; total is built dynamically
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
@@ -378,8 +392,8 @@
 
 // Checking if user is "Demo." or has some local account
 - (BOOL)checkAccessWithDialog:(BOOL)show {
-    BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."]
-                   || (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
+    BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."] ||
+                   (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
     if (!accessible) {
         [self.progress cancel];
         if (show) {
