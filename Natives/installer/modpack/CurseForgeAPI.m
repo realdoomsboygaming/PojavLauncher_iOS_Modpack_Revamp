@@ -36,9 +36,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
-// NEW: Move all downloaded .jar files to the mods folder. (Deprecated now)
-- (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
-// New helper to load the manifest from extracted files.
+// (Deprecated) - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
 - (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error;
 @end
 
@@ -184,12 +182,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     return manifest;
 }
 
-#pragma mark - Helper: Move .jar Files to Mods Folder
-
-- (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath {
-    // This method is now deprecated since mods are downloaded directly to the mods folder.
-}
-
 #pragma mark - New Order: Extraction, then Manifest, then Downloads
 
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader
@@ -254,6 +246,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (dashRange.location != NSNotFound) {
                             NSString *loaderName = [rawId substringToIndex:dashRange.location];
                             NSString *loaderVer = [rawId substringFromIndex:(dashRange.location + 1)];
+                            // Here, if needed, you could detect "neoforge" based on loaderName or loaderVer.
                             if ([loaderName isEqualToString:@"forge"]) {
                                 modLoaderId = @"forge";
                                 modLoaderVersion = loaderVer;
@@ -417,12 +410,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                     }
                     
-                    // Auto-install loader (unchanged)
+                    // Auto-install loader: for Forge/NeoForge and Fabric dummy.
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([modLoaderId isEqualToString:@"forge"]) {
-                            [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
+                            [weakSelf runForgeInstallerForVersion:finalVersionString vendor:@"Forge"];
+                        } else if ([modLoaderId isEqualToString:@"neoforge"]) {
+                            [weakSelf runForgeInstallerForVersion:finalVersionString vendor:@"NeoForge"];
                         } else if ([modLoaderId isEqualToString:@"fabric"]) {
-                            [weakSelf autoInstallFabricWithFullString:finalVersionString];
+                            [weakSelf runFabricInstallerForVersion:finalVersionString];
                         } else {
                             NSLog(@"Auto-install: Unrecognized loader: %@", modLoaderId);
                         }
@@ -569,56 +564,52 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     }
 }
 
-#pragma mark - Helper: Auto-install Loader
+#pragma mark - Auto-Install Methods
 
-- (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer {
-    if (!vanillaVer.length || !forgeVer.length) {
-        NSLog(@"autoInstallForge: Missing version information.");
-        return;
-    }
-    NSString *finalId = [NSString stringWithFormat:@"%@-forge-%@", vanillaVer, forgeVer];
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
-                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                          finalId, finalId];
-    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
-                              withIntermediateDirectories:YES attributes:nil error:nil];
-    NSDictionary *forgeDict = @{
-        @"id": finalId,
-        @"type": @"custom",
-        @"minecraft": vanillaVer,
-        @"loader": @"forge",
-        @"loaderVersion": forgeVer
+- (void)runForgeInstallerForVersion:(NSString *)version vendor:(NSString *)vendor {
+    // Build the installer URL using the vendor's endpoint.
+    NSDictionary *endpoints = @{
+        @"Forge": @{
+            @"installer": @"https://maven.minecraftforge.net/net/minecraftforge/forge/%1$@/forge-%1$@-installer.jar"
+        },
+        @"NeoForge": @{
+            @"installer": @"https://maven.neoforged.net/net/neoforged/forge/%1$@/forge-%1$@-installer.jar"
+        }
     };
-    NSError *writeErr = saveJSONToFile(forgeDict, jsonPath);
-    if (writeErr) {
-        NSLog(@"autoInstallForge: Error writing JSON: %@", writeErr);
-    } else {
-        NSLog(@"autoInstallForge: Successfully wrote Forge JSON at %@", jsonPath);
-    }
+    NSString *installerURL = [NSString stringWithFormat:endpoints[vendor][@"installer"], version];
+    NSLog(@"[Auto-Install] Downloading %@ installer from %@", vendor, installerURL);
+    
+    // Download the installer jar to a temporary location.
+    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"forge_installer.jar"];
+    NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:installerURL]];
+    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
+    NSURLSessionDownloadTask *task = [manager downloadTaskWithRequest:request progress:^(NSProgress * _Nonnull progress) {
+        // Optionally update progress UI here.
+    } destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
+        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+        return [NSURL fileURLWithPath:tempPath];
+    } completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
+        if (error) {
+            NSLog(@"[Auto-Install] Error downloading installer: %@", error);
+        } else {
+            NSLog(@"[Auto-Install] Successfully downloaded installer to %@", filePath.path);
+            [self launchForgeInstallerAtPath:filePath.path];
+        }
+    }];
+    [task resume];
 }
 
-- (void)autoInstallFabricWithFullString:(NSString *)fabricString {
-    if (!fabricString.length) {
-        NSLog(@"autoInstallFabric: Missing fabric version string.");
-        return;
-    }
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
-                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                          fabricString, fabricString];
-    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
-                              withIntermediateDirectories:YES attributes:nil error:nil];
-    NSDictionary *fabricDict = @{
-        @"id": fabricString,
-        @"type": @"custom",
-        @"loader": @"fabric",
-        @"loaderVersion": fabricString
-    };
-    NSError *writeErr = saveJSONToFile(fabricDict, jsonPath);
-    if (writeErr) {
-        NSLog(@"autoInstallFabric: Error writing JSON: %@", writeErr);
-    } else {
-        NSLog(@"autoInstallFabric: Successfully wrote Fabric JSON at %@", jsonPath);
-    }
+- (void)launchForgeInstallerAtPath:(NSString *)installerPath {
+    // Simulate launching the installer as if the user had selected it.
+    NSLog(@"[Auto-Install] Launching Forge installer at %@", installerPath);
+    // For example, you might call:
+    [LauncherNavigationController enterModInstallerWithPath:installerPath hitEnterAfterWindowShown:YES];
+    // For now, we simply log the action.
+}
+
+- (void)runFabricInstallerForVersion:(NSString *)version {
+    // Dummy implementation for Fabric.
+    NSLog(@"[Auto-Install] Running dummy Fabric installer for version %@", version);
 }
 
 #pragma mark - Manifest Verification
