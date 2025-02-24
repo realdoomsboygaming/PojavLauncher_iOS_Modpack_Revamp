@@ -340,14 +340,17 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
                         
-                        // Move all .jar files to the mods folder.
-                        [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
-                        
-                        // Remove the modpack zip file.
-                        [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-                        
-                        // Finalize downloads (now waiting for all files).
-                        [downloader finalizeDownloads];
+                        // Add a short delay to ensure all file operations are complete.
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            // Move all .jar files to the mods folder.
+                            [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
+                            
+                            // Remove the modpack zip file.
+                            [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
+                            
+                            // Finalize downloads.
+                            [downloader finalizeDownloads];
+                        });
                     });
                     
                     // Dependency download and profile creation.
