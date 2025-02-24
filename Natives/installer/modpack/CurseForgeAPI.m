@@ -36,7 +36,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
-// NEW: Move all downloaded .jar files to the mods folder.
+// NEW: Move all downloaded .jar files to the mods folder. (Deprecated now)
 - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
 // New helper to load the manifest from extracted files.
 - (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error;
@@ -187,34 +187,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 #pragma mark - Helper: Move .jar Files to Mods Folder
 
 - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *modsDir = [destPath stringByAppendingPathComponent:@"mods"];
-    if (![fileManager fileExistsAtPath:modsDir]) {
-        NSError *createError = nil;
-        [fileManager createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:&createError];
-        if (createError) {
-            NSLog(@"Error creating mods directory: %@", createError);
-            return;
-        }
-    }
-    NSDirectoryEnumerator *enumerator = [fileManager enumeratorAtPath:destPath];
-    for (NSString *item in enumerator) {
-        NSString *fullPath = [destPath stringByAppendingPathComponent:item];
-        BOOL isDirectory = NO;
-        [fileManager fileExistsAtPath:fullPath isDirectory:&isDirectory];
-        if (!isDirectory && [[fullPath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame) {
-            if (![item hasPrefix:@"mods/"]) {
-                NSString *destJarPath = [modsDir stringByAppendingPathComponent:[item lastPathComponent]];
-                NSError *moveError = nil;
-                [fileManager moveItemAtPath:fullPath toPath:destJarPath error:&moveError];
-                if (moveError) {
-                    NSLog(@"Error moving jar file %@: %@", fullPath, moveError);
-                } else {
-                    NSLog(@"Moved %@ to %@", fullPath, destJarPath);
-                }
-            }
-        }
-    }
+    // This method is now deprecated since mods are downloaded directly to the mods folder.
 }
 
 #pragma mark - New Order: Extraction, then Manifest, then Downloads
@@ -247,6 +220,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         [downloader finishDownloadWithErrorString:@"Invalid manifest"];
                     });
                     return;
+                }
+                
+                // Create mods folder if it doesn't exist
+                NSString *modsDir = [destPath stringByAppendingPathComponent:@"mods"];
+                if (![[NSFileManager defaultManager] fileExistsAtPath:modsDir]) {
+                    NSError *createError = nil;
+                    [[NSFileManager defaultManager] createDirectoryAtPath:modsDir withIntermediateDirectories:YES attributes:nil error:&createError];
+                    if (createError) {
+                        NSLog(@"Error creating mods directory: %@", createError);
+                    }
                 }
                 
                 // *** NEW: Create profile BEFORE starting downloads ***
@@ -364,7 +347,15 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
                         }
                         
-                        NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
+                        // NEW: If the file is a jar and not already in "mods", download directly there.
+                        NSString *destinationPath;
+                        if ([[relativePath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame &&
+                            ![relativePath hasPrefix:@"mods/"]) {
+                            destinationPath = [[destPath stringByAppendingPathComponent:@"mods"] stringByAppendingPathComponent:[relativePath lastPathComponent]];
+                        } else {
+                            destinationPath = [destPath stringByAppendingPathComponent:relativePath];
+                        }
+                        
                         NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
                         if (rawSize == 0) { rawSize = 1; }
                         
@@ -380,7 +371,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             }];
                             if (task) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
-                                    NSLog(@"Starting download for %@", relativePath);
+                                    NSLog(@"Starting download for %@", destinationPath);
                                     [task resume];
                                 });
                             } else {
@@ -392,7 +383,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                 });
                             }
                         } @catch (NSException *ex) {
-                            NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
+                            NSLog(@"Exception creating/resuming task for %@: %@", destinationPath, ex);
                             dispatch_group_leave(group);
                         }
                     }];
@@ -403,9 +394,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
-                        
-                        // Move all .jar files to the mods folder.
-                        [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
                         
                         // Remove the modpack zip file.
                         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
