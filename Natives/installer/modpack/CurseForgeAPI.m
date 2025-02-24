@@ -263,6 +263,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 NSString *modpackFolderName = destPath.lastPathComponent;
                 dispatch_group_t group = dispatch_group_create();
+                __block NSUInteger completedDownloads = 0; // Track completed URL retrievals
                 
                 for (NSDictionary *fileEntry in files) {
                     dispatch_group_enter(group);
@@ -273,6 +274,15 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
                                                  fileID:[fileID unsignedLongLongValue]
                                              completion:^(NSString *url, NSError *error) {
+                        completedDownloads++;
+                        // When one file remains (all but one have been processed), trigger finalization.
+                        if (completedDownloads == files.count - 1) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                NSLog(@"One file remaining, proceeding to the next step.");
+                                [downloader finalizeDownloads];
+                            });
+                        }
+                        
                         if (!url && required) {
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 NSString *modName = fileEntry[@"fileName"] ?: @"UnknownFile";
@@ -309,25 +319,17 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (rawSize == 0) { rawSize = 1; }
                         
                         @try {
-                            // Enter group for the actual download task.
-                            dispatch_group_enter(group);
                             NSURLSessionDownloadTask *task = [downloader createDownloadTask:url
                                                                                        size:rawSize
                                                                                         sha:nil
                                                                                      altName:nil
-                                                                                       toPath:destinationPath
-                                                                                     success:^{
-                                // Download task completed.
-                                dispatch_group_leave(group);
-                            }];
+                                                                                       toPath:destinationPath];
                             if (task) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     NSLog(@"Starting download for %@", relativePath);
                                     [task resume];
                                 });
                             } else {
-                                // No task created, so leave immediately.
-                                dispatch_group_leave(group);
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     if (!downloader.progress.cancelled) {
                                         downloader.progress.completedUnitCount++;
@@ -336,30 +338,23 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             }
                         } @catch (NSException *ex) {
                             NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
-                            dispatch_group_leave(group);
                         }
                         
-                        dispatch_group_leave(group); // Leave group for URL retrieval.
+                        dispatch_group_leave(group);
                     }];
                 }
                 
-                // Finalize after all download tasks have completed.
+                // Step 4: Finalize after downloads.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
                         
-                        // Add a short delay to ensure all file operations are complete.
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                            // Move all .jar files to the mods folder.
-                            [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
-                            
-                            // Remove the modpack zip file.
-                            [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-                            
-                            // Finalize downloads.
-                            [downloader finalizeDownloads];
-                        });
+                        // Move all .jar files to the mods folder.
+                        [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
+                        
+                        // Remove the modpack zip file.
+                        [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
                     });
                     
                     // Dependency download and profile creation.
