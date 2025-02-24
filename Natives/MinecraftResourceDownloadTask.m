@@ -374,7 +374,15 @@
     [self.progressList removeAllObjects];
 }
 
-// On error, we cancel everything
+// *** New public method implementation ***
+- (void)finalizeDownloads {
+    self.progress.completedUnitCount = self.progress.totalUnitCount;
+    self.textProgress.completedUnitCount = self.progress.totalUnitCount;
+    NSLog(@"Finalizing downloads...");
+}
+
+#pragma mark - On Error
+
 - (void)finishDownloadWithErrorString:(NSString *)error {
     [self.progress cancel];
     [self.manager invalidateSessionCancelingTasks:YES resetSession:YES];
@@ -382,7 +390,6 @@
     self.handleError();
 }
 
-// On single-file error
 - (void)finishDownloadWithError:(NSError *)error file:(NSString *)file {
     NSString *errorStr = [NSString stringWithFormat:localize(@"launcher.mcl.error_download", NULL),
                           file, error.localizedDescription];
@@ -390,7 +397,8 @@
     [self finishDownloadWithErrorString:errorStr];
 }
 
-// Checking if user is "Demo." or has some local account
+#pragma mark - Access Check
+
 - (BOOL)checkAccessWithDialog:(BOOL)show {
     BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."] ||
                    (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
@@ -403,7 +411,8 @@
     return accessible;
 }
 
-// Various SHA checks
+#pragma mark - SHA Checks
+
 - (BOOL)checkSHAIgnorePref:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
     if (sha.length == 0) {
         BOOL existence = [NSFileManager.defaultManager fileExistsAtPath:path];
@@ -441,7 +450,6 @@
     }
 }
 
-// Convenience method for checkSHA:forFile:altName: (without logSuccess parameter)
 - (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName {
     return [self checkSHA:sha forFile:path altName:altName logSuccess:(altName == nil)];
 }
