@@ -392,8 +392,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                     modLoaderVersion = loaderVer;
                                 } else if ([loaderName isEqualToString:@"fabric"]) {
                                     modLoaderId = @"fabric";
-                                    // For Fabric, we now generate a version string that will be modified for installation.
-                                    modLoaderVersion = loaderVer;
+                                    modLoaderVersion = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVer, vanillaVersion];
                                 } else {
                                     modLoaderId = loaderName;
                                     modLoaderVersion = loaderVer;
@@ -408,8 +407,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     if ([modLoaderId isEqualToString:@"forge"]) {
                         finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, modLoaderVersion];
                     } else if ([modLoaderId isEqualToString:@"fabric"]) {
-                        // Change the version string for Fabric so that it is recognized as an installer version.
-                        finalVersionString = [NSString stringWithFormat:@"fabric-install-%@", vanillaVersion];
+                        finalVersionString = modLoaderVersion;
                     } else {
                         finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                     }
@@ -427,8 +425,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             NSLog(@"Setting profile: %@", profileName);
                             PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
                             PLProfiles.current.selectedProfileName = profileName;
-                            // Persist the updated profiles using the 'save' method.
-                            [PLProfiles.current save];
                         });
                     }
                     
@@ -436,7 +432,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if ([modLoaderId isEqualToString:@"forge"]) {
                             [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
                         } else if ([modLoaderId isEqualToString:@"fabric"]) {
-                            [weakSelf autoInstallFabricWithFullString:modLoaderVersion];
+                            [weakSelf autoInstallFabricWithFullString:finalVersionString];
                         } else {
                             NSLog(@"Auto-install: Unrecognized loader: %@", modLoaderId);
                         }
@@ -451,7 +447,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 
 - (void)searchModWithFilters:(NSDictionary *)searchFilters
          previousPageResult:(NSMutableArray *)prevResult
-                 completion:(void (^ _Nonnull)(NSMutableArray *results, NSError *error))completion {
+                 completion:(void (^)(NSMutableArray *results, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int limit = CURSEFORGE_PAGINATION_SIZE;
         NSString *query = searchFilters[@"name"] ?: @"";
@@ -616,20 +612,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSLog(@"autoInstallFabric: Missing fabric version string.");
         return;
     }
-    // For Fabric, create an installer version that prevents immediate modloader launch.
-    // We generate an installer version ID by appending "-install" if not already present.
-    NSString *installerVersion = [fabricString containsString:@"-install"] ? fabricString : [NSString stringWithFormat:@"%@-install", fabricString];
     NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
                           [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                          installerVersion, installerVersion];
+                          fabricString, fabricString];
     [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
                               withIntermediateDirectories:YES attributes:nil error:nil];
     NSDictionary *fabricDict = @{
-        @"id": installerVersion,
+        @"id": fabricString,
         @"type": @"custom",
         @"loader": @"fabric",
-        @"loaderVersion": fabricString,
-        @"jvmInstall": @YES  // This flag indicates that the JVM environment should perform the install.
+        @"loaderVersion": fabricString
     };
     NSError *writeErr = saveJSONToFile(fabricDict, jsonPath);
     if (writeErr) {
