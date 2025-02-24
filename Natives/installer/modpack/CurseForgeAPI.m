@@ -656,14 +656,4 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     return YES;
 }
 
-#pragma mark - asyncExtractManifestFromPackage (stub)
-
-- (void)asyncExtractManifestFromPackage:(NSString *)packagePath
-                             completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
-    // This method is declared but not used in the current flow.
-    if (completion) {
-        completion(nil, nil);
-    }
-}
-
 @end
