@@ -264,6 +264,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 NSString *modpackFolderName = destPath.lastPathComponent;
                 dispatch_group_t group = dispatch_group_create();
                 __block NSUInteger completedDownloads = 0; // Track completed URL retrievals
+                __block BOOL didFinalize = NO; // Ensure finalization is only called once
                 
                 for (NSDictionary *fileEntry in files) {
                     dispatch_group_enter(group);
@@ -275,8 +276,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                                                  fileID:[fileID unsignedLongLongValue]
                                              completion:^(NSString *url, NSError *error) {
                         completedDownloads++;
-                        // When one file remains (all but one have been processed), trigger finalization.
-                        if (completedDownloads == files.count - 1) {
+                        // When one file remains (all but one have been processed), trigger finalization if not already done.
+                        if (completedDownloads >= files.count - 1 && !didFinalize) {
+                            didFinalize = YES;
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 NSLog(@"One file remaining, proceeding to the next step.");
                                 [downloader finalizeDownloads];
@@ -344,18 +346,23 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }];
                 }
                 
-                // Step 4: Finalize after downloads.
+                // Finalize after all files have been processed.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
-                        downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
-                        
-                        // Move all .jar files to the mods folder.
-                        [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
-                        
-                        // Remove the modpack zip file.
-                        [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-                    });
+                    if (!didFinalize) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
+                            downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
+                            
+                            // Move all .jar files to the mods folder.
+                            [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
+                            
+                            // Remove the modpack zip file.
+                            [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
+                            
+                            // Finalize downloads as fallback.
+                            [downloader finalizeDownloads];
+                        });
+                    }
                     
                     // Dependency download and profile creation.
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
