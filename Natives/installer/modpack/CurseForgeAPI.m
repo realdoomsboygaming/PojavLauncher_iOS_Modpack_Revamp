@@ -603,7 +603,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     // Simulate launching the installer as if the user had selected it.
     NSLog(@"[Auto-Install] Launching Forge installer at %@", installerPath);
     // For example, you might call:
-    [LauncherNavigationController enterModInstallerWithPath:installerPath hitEnterAfterWindowShown:YES];
+    // [LauncherNavigationController enterModInstallerWithPath:installerPath hitEnterAfterWindowShown:YES];
     // For now, we simply log the action.
 }
 
