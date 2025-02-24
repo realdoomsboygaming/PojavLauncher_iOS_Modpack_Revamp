@@ -265,7 +265,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 dispatch_group_t group = dispatch_group_create();
                 
                 for (NSDictionary *fileEntry in files) {
+                    // One group enter per file.
                     dispatch_group_enter(group);
+                    
                     NSNumber *projectID = fileEntry[@"projectID"];
                     NSNumber *fileID = fileEntry[@"fileID"];
                     BOOL required = [fileEntry[@"required"] boolValue];
@@ -304,19 +306,28 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (rawSize == 0) { rawSize = 1; }
                         
                         @try {
-                            // Once URL is retrieved, create a download task and wait for it.
-                            [downloader createDownloadTask:url
-                                                      size:rawSize
-                                                       sha:nil
-                                                   altName:nil
-                                                     toPath:destinationPath
-                                                   success:^{
-                                // Download task for this file is complete.
+                            // Create a download task with a success callback that leaves the group.
+                            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url
+                                                                                       size:rawSize
+                                                                                        sha:nil
+                                                                                     altName:nil
+                                                                                       toPath:destinationPath
+                                                                                     success:^{
                                 dispatch_group_leave(group);
                             }];
-                            
-                            // If no task was created, we still leave.
-                            dispatch_group_leave(group);
+                            if (task) {
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    NSLog(@"Starting download for %@", relativePath);
+                                    [task resume];
+                                });
+                            } else {
+                                dispatch_group_leave(group);
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    if (!downloader.progress.cancelled) {
+                                        downloader.progress.completedUnitCount++;
+                                    }
+                                });
+                            }
                         } @catch (NSException *ex) {
                             NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
                             dispatch_group_leave(group);
@@ -324,7 +335,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }];
                 }
                 
-                // Finalize after all download tasks have completed.
+                // Finalize after all files have been processed.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
