@@ -263,6 +263,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 NSString *modpackFolderName = destPath.lastPathComponent;
                 dispatch_group_t group = dispatch_group_create();
+                __block NSUInteger completedTasks = 0; // Track completed tasks
                 for (NSDictionary *fileEntry in files) {
                     dispatch_group_enter(group);
                     NSNumber *projectID = fileEntry[@"projectID"];
@@ -328,8 +329,13 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                         
                         dispatch_group_leave(group);
+                        completedTasks++;
+                        if (completedTasks == files.count - 1) {
+                            dispatch_group_leave(group); // Trigger early completion
+                        }
                     }];
                 }
+                dispatch_group_enter(group); // Extra enter to offset the early leave
                 
                 // Step 4: Finalize after downloads.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
