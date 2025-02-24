@@ -26,8 +26,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 @property (nonatomic, copy) NSString *apiKey;
 // Private helper methods.
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest;
-- (void)asyncExtractManifestFromPackage:(NSString *)packagePath
-                             completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion;
 - (void)getEndpoint:(NSString *)endpoint
              params:(NSDictionary *)params
          completion:(void (^)(id result, NSError *error))completion;
@@ -36,10 +34,13 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                                  completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
-// NEW: Move all downloaded .jar files to the mods folder.
 - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
-// New helper to load the manifest from extracted files.
+// New helper: load the manifest from the extracted files.
 - (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error;
+// New method: Download the modpack zip and then process it.
+- (void)downloadModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion completion:(void (^)(NSError *error))completion;
+// New method: Process the fully downloaded modpack zip.
+- (void)processModpackZipAtPath:(NSString *)zipPath toDestination:(NSString *)destPath completion:(void (^)(NSError *error))completion;
 @end
 
 @implementation CurseForgeAPI {
@@ -64,7 +65,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
          completion:(void (^)(id, NSError *))completion {
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -95,9 +95,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             if (completion) {
-                NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
-                                                   code:-1
-                                               userInfo:@{NSLocalizedDescriptionKey: @"Internal error (self was deallocated)."}];
+                NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Internal error (self was deallocated)."}];
                 completion(nil, err);
             }
             return;
@@ -109,8 +107,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             } else {
                 attempt++;
                 if (attempt < 2) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                                   strongSelf->_networkQueue, ^{
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), strongSelf->_networkQueue, ^{
                         __strong typeof(weakAttemptBlock) innerBlock = weakAttemptBlock;
                         if (innerBlock) innerBlock();
                     });
@@ -132,7 +129,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     if (self.apiKey && self.apiKey.length > 0) {
         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", self.apiKey];
     }
-    
     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     [self getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
         NSLog(@"Fallback response: %@", fallbackResponse);
@@ -143,8 +139,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                 NSDictionary *modData = (NSDictionary *)dataObj;
                 id idNumberObj = modData[@"id"];
                 id fileNameObj = modData[@"fileName"];
-                if ([idNumberObj isKindOfClass:[NSNumber class]] &&
-                    [fileNameObj isKindOfClass:[NSString class]]) {
+                if ([idNumberObj isKindOfClass:[NSNumber class]] && [fileNameObj isKindOfClass:[NSString class]]) {
                     NSNumber *idNumber = (NSNumber *)idNumberObj;
                     NSString *fileName = (NSString *)fileNameObj;
                     if (fileName.length > 0) {
@@ -217,252 +212,219 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     }
 }
 
-#pragma mark - New Order: Extraction, then Manifest, then Downloads
+#pragma mark - New Order: Download, then Process Zip
 
-- (void)downloader:(MinecraftResourceDownloadTask *)downloader
-submitDownloadTasksFromPackage:(NSString *)packagePath
-            toPath:(NSString *)destPath {
-    __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        @autoreleasepool {
-            // Step 1: Extract the entire modpack zip into destPath.
-            NSError *extractError = nil;
-            UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&extractError];
-            if (!archive) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    NSLog(@"Archive initialization failed: %@", extractError.localizedDescription);
-                    [downloader finishDownloadWithErrorString:extractError.localizedDescription];
-                });
+// New method: Download the modpack zip and, once complete, process it.
+- (void)downloadModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion completion:(void (^)(NSError *error))completion {
+    NSString *url = modDetail[@"versionUrls"][selectedVersion];
+    NSUInteger size = [modDetail[@"versionSizes"][selectedVersion] unsignedLongLongValue];
+    NSString *sha = modDetail[@"versionHashes"][selectedVersion];
+    NSString *name = [[[[modDetail[@"title"] lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
+                       stringByReplacingOccurrencesOfString:@" " withString:@"_"] copy];
+    NSString *zipPath = [NSTemporaryDirectory() stringByAppendingFormat:@"/%@.zip", name];
+    
+    // Assume createDownloadTask:size:sha:altName:toPath:success: exists (e.g. from MinecraftResourceDownloadTask)
+    NSURLSessionDownloadTask *task = [self createDownloadTask:url size:size sha:sha altName:nil toPath:zipPath success:^{
+        NSString *destinationPath = [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
+        [self processModpackZipAtPath:zipPath toDestination:destinationPath completion:completion];
+    }];
+    [task resume];
+}
+
+// New method: Process the modpack zip once fully downloaded.
+- (void)processModpackZipAtPath:(NSString *)zipPath toDestination:(NSString *)destPath completion:(void (^)(NSError *error))completion {
+    // Step 1: Extract the entire zip into destPath using performOnFilesInArchive:
+    NSError *extractError = nil;
+    UZKArchive *archive = [[UZKArchive alloc] initWithPath:zipPath error:&extractError];
+    if (!archive) {
+        if (completion) completion(extractError);
+        return;
+    }
+    [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
+        NSString *destItemPath = [destPath stringByAppendingPathComponent:fileInfo.filename];
+        if (fileInfo.isDirectory) {
+            [[NSFileManager defaultManager] createDirectoryAtPath:destItemPath withIntermediateDirectories:YES attributes:nil error:nil];
+        } else {
+            NSError *localError = nil;
+            NSData *data = [archive extractData:fileInfo error:&localError];
+            if (data) {
+                [data writeToFile:destItemPath options:NSDataWritingAtomic error:&localError];
+            }
+        }
+    } error:&extractError];
+    if (extractError) {
+        if (completion) completion(extractError);
+        return;
+    }
+    
+    // Step 2: Load and verify the manifest from the extracted files.
+    NSDictionary *manifestDict = [self loadManifestFromDestination:destPath error:&extractError];
+    if (!manifestDict) {
+        if (completion) {
+            completion([NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:0 userInfo:@{NSLocalizedDescriptionKey: @"Manifest not found in extracted files."}]);
+        }
+        return;
+    }
+    if (![self verifyManifestFromDictionary:manifestDict]) {
+        if (completion) {
+            completion([NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:0 userInfo:@{NSLocalizedDescriptionKey: @"Manifest verification failed"}]);
+        }
+        return;
+    }
+    
+    // Step 3: For each file in the manifest, schedule a download if needed.
+    NSArray *allFiles = manifestDict[@"files"];
+    NSMutableArray *files = [NSMutableArray new];
+    NSMutableSet *uniqueKeys = [NSMutableSet new];
+    for (NSDictionary *fileEntry in allFiles) {
+        NSString *uniqueKey = [NSString stringWithFormat:@"%@-%@", fileEntry[@"projectID"], fileEntry[@"fileID"]];
+        if (![uniqueKeys containsObject:uniqueKey]) {
+            [uniqueKeys addObject:uniqueKey];
+            [files addObject:fileEntry];
+        }
+    }
+    
+    NSString *modpackFolderName = destPath.lastPathComponent;
+    dispatch_group_t group = dispatch_group_create();
+    for (NSDictionary *fileEntry in files) {
+        dispatch_group_enter(group);
+        NSNumber *projectID = fileEntry[@"projectID"];
+        NSNumber *fileID = fileEntry[@"fileID"];
+        BOOL required = [fileEntry[@"required"] boolValue];
+        
+        [self getDownloadUrlForProject:[projectID unsignedLongLongValue]
+                                fileID:[fileID unsignedLongLongValue]
+                            completion:^(NSString *url, NSError *error) {
+            if (!url && required) {
+                NSLog(@"Failed to obtain URL for %@ in modpack %@", fileEntry[@"fileName"] ?: @"UnknownFile", modpackFolderName);
+                dispatch_group_leave(group);
+                return;
+            } else if (!url) {
+                dispatch_group_leave(group);
                 return;
             }
-            // Use performOnFilesInArchive: to extract all files.
-            [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
-                NSString *destItemPath = [destPath stringByAppendingPathComponent:fileInfo.filename];
-                if (fileInfo.isDirectory) {
-                    [[NSFileManager defaultManager] createDirectoryAtPath:destItemPath withIntermediateDirectories:YES attributes:nil error:nil];
-                } else {
-                    NSError *localError = nil;
-                    NSData *data = [archive extractData:fileInfo error:&localError];
-                    if (data) {
-                        [data writeToFile:destItemPath options:NSDataWritingAtomic error:&localError];
-                    }
-                }
-            } error:&extractError];
-            if (extractError) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    NSLog(@"Extraction failed: %@", extractError.localizedDescription);
-                    [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to extract modpack contents: %@", extractError.localizedDescription]];
-                });
-                return;
-            }
-            
-            // Step 2: Load manifest from extracted files.
-            NSDictionary *manifestDict = [weakSelf loadManifestFromDestination:destPath error:&extractError];
-            if (!manifestDict) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [downloader finishDownloadWithErrorString:@"Manifest not found in extracted files."];
-                });
-                return;
-            }
-            if (![weakSelf verifyManifestFromDictionary:manifestDict]) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    NSLog(@"Manifest verification failed");
-                    [downloader finishDownloadWithErrorString:@"Manifest verification failed"];
-                });
-                return;
-            }
-            
-            // Step 3: Schedule downloads for any missing files.
-            NSArray *allFiles = manifestDict[@"files"];
-            NSMutableArray *files = [NSMutableArray new];
-            NSMutableSet *uniqueKeys = [NSMutableSet new];
-            for (NSDictionary *fileEntry in allFiles) {
-                NSString *uniqueKey = [NSString stringWithFormat:@"%@-%@", fileEntry[@"projectID"], fileEntry[@"fileID"]];
-                if (![uniqueKeys containsObject:uniqueKey]) {
-                    [uniqueKeys addObject:uniqueKey];
-                    [files addObject:fileEntry];
+            NSString *relativePath = fileEntry[@"path"];
+            if (!relativePath || relativePath.length == 0) {
+                relativePath = fileEntry[@"fileName"];
+                if (!relativePath || relativePath.length == 0) {
+                    NSURL *dlURL = [NSURL URLWithString:url];
+                    relativePath = dlURL.lastPathComponent ?: [NSString stringWithFormat:@"%@.jar", fileID];
                 }
             }
-            
-            NSString *modpackFolderName = destPath.lastPathComponent;
-            dispatch_group_t group = dispatch_group_create();
-            for (NSDictionary *fileEntry in files) {
-                dispatch_group_enter(group);
-                NSNumber *projectID = fileEntry[@"projectID"];
-                NSNumber *fileID = fileEntry[@"fileID"];
-                BOOL required = [fileEntry[@"required"] boolValue];
-                
-                [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
-                                             fileID:[fileID unsignedLongLongValue]
-                                         completion:^(NSString *url, NSError *error) {
-                    if (!url && required) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            NSString *modName = fileEntry[@"fileName"] ?: @"UnknownFile";
-                            NSLog(@"Failed to obtain URL for %@ in modpack %@", modName, modpackFolderName);
-                            [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Failed to obtain download URL for modpack '%@' and mod '%@'", modpackFolderName, modName]];
-                        });
-                        dispatch_group_leave(group);
-                        return;
-                    } else if (!url) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            downloader.progress.completedUnitCount++;
-                        });
-                        dispatch_group_leave(group);
-                        return;
-                    }
-                    
-                    NSString *relativePath = fileEntry[@"path"];
-                    if (!relativePath || relativePath.length == 0) {
-                        relativePath = fileEntry[@"fileName"];
-                        if (!relativePath || relativePath.length == 0) {
-                            NSURL *dlURL = [NSURL URLWithString:url];
-                            relativePath = dlURL.lastPathComponent ?: [NSString stringWithFormat:@"%@.jar", fileID];
-                        }
-                    }
-                    NSArray *components = [relativePath pathComponents];
-                    if (components.count > 1 && [[components firstObject] caseInsensitiveCompare:modpackFolderName] == NSOrderedSame) {
-                        relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
-                    }
-                    
-                    NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
-                    NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
-                    if (rawSize == 0) { rawSize = 1; }
-                    
-                    @try {
-                        NSURLSessionDownloadTask *task = [downloader createDownloadTask:url
-                                                                                   size:rawSize
-                                                                                    sha:nil
-                                                                                 altName:nil
-                                                                                   toPath:destinationPath];
-                        if (task) {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                NSLog(@"Starting download for %@", relativePath);
-                                [task resume];
-                            });
-                        } else {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                if (!downloader.progress.cancelled) {
-                                    downloader.progress.completedUnitCount++;
-                                }
-                            });
-                        }
-                    } @catch (NSException *ex) {
-                        NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
-                    }
-                    
-                    dispatch_group_leave(group);
-                }];
+            NSArray *components = [relativePath pathComponents];
+            if (components.count > 1 && [[components firstObject] caseInsensitiveCompare:modpackFolderName] == NSOrderedSame) {
+                relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
             }
-            
-            // Step 4: Finalize after downloads.
-            dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
-                    downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
-                    
-                    // Move all .jar files to the mods folder.
-                    [weakSelf moveJarFilesToModsFolderInDirectory:destPath];
-                    
-                    // Remove the modpack zip file.
-                    [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
-                });
-                
-                // Dependency download and profile creation.
-                NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
-                if (depInfo[@"json"]) {
-                    NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json",
-                                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                                          depInfo[@"id"]];
-                    NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
-                    if (depTask) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            NSLog(@"Starting dependency download");
-                            [depTask resume];
-                        });
+            NSString *destinationPath = [destPath stringByAppendingPathComponent:relativePath];
+            NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
+            if (rawSize == 0) { rawSize = 1; }
+            @try {
+                NSURLSessionDownloadTask *task = [self createDownloadTask:url size:rawSize sha:nil altName:nil toPath:destinationPath];
+                if (task) { [task resume]; }
+            } @catch (NSException *ex) {
+                NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
+            }
+            dispatch_group_leave(group);
+        }];
+    }
+    
+    dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Finalize: Move all .jar files to the mods folder.
+            [self moveJarFilesToModsFolderInDirectory:destPath];
+            // Remove the original zip file.
+            [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+        });
+        
+        // Dependency download and profile creation.
+        NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
+        if (depInfo[@"json"]) {
+            NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json",
+                                  [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
+                                  depInfo[@"id"]];
+            NSURLSessionDownloadTask *depTask = [self createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
+            if (depTask) { [depTask resume]; }
+        }
+        
+        NSDictionary *minecraft = manifestDict[@"minecraft"];
+        NSString *vanillaVersion = @"";
+        NSString *modLoaderId = @"";
+        NSString *modLoaderVersion = @"";
+        if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
+            vanillaVersion = minecraft[@"version"] ?: @"";
+            NSArray *modLoaders = minecraft[@"modLoaders"];
+            NSDictionary *primaryModLoader = nil;
+            if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
+                for (NSDictionary *loader in modLoaders) {
+                    if ([loader[@"primary"] boolValue]) {
+                        primaryModLoader = loader;
+                        break;
                     }
                 }
-                
-                NSDictionary *minecraft = manifestDict[@"minecraft"];
-                NSString *vanillaVersion = @"";
-                NSString *modLoaderId = @"";
-                NSString *modLoaderVersion = @"";
-                if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
-                    vanillaVersion = minecraft[@"version"] ?: @"";
-                    NSArray *modLoaders = minecraft[@"modLoaders"];
-                    NSDictionary *primaryModLoader = nil;
-                    if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
-                        for (NSDictionary *loader in modLoaders) {
-                            if ([loader[@"primary"] boolValue]) {
-                                primaryModLoader = loader;
-                                break;
-                            }
-                        }
-                        if (!primaryModLoader) { primaryModLoader = modLoaders[0]; }
-                        NSString *rawId = primaryModLoader[@"id"] ?: @"";
-                        NSRange dashRange = [rawId rangeOfString:@"-"];
-                        if (dashRange.location != NSNotFound) {
-                            NSString *loaderName = [rawId substringToIndex:dashRange.location];
-                            NSString *loaderVer = [rawId substringFromIndex:(dashRange.location + 1)];
-                            if ([loaderName isEqualToString:@"forge"]) {
-                                modLoaderId = @"forge";
-                                modLoaderVersion = loaderVer;
-                            } else if ([loaderName isEqualToString:@"fabric"]) {
-                                modLoaderId = @"fabric";
-                                modLoaderVersion = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVer, vanillaVersion];
-                            } else {
-                                modLoaderId = loaderName;
-                                modLoaderVersion = loaderVer;
-                            }
-                        } else {
-                            modLoaderId = rawId;
-                            modLoaderVersion = rawId;
-                        }
-                    }
-                }
-                NSString *finalVersionString = @"";
-                if ([modLoaderId isEqualToString:@"forge"]) {
-                    finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, modLoaderVersion];
-                } else if ([modLoaderId isEqualToString:@"fabric"]) {
-                    finalVersionString = modLoaderVersion;
-                } else {
-                    finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
-                }
-                
-                // Fixed profile gameDir: include "custom_gamedir" in the path.
-                NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
-                if (profileName.length > 0) {
-                    NSDictionary *profileInfo = @{
-                        @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
-                        @"name": profileName,
-                        @"lastVersionId": finalVersionString,
-                        @"icon": @""
-                    };
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        NSLog(@"Setting profile: %@", profileName);
-                        PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
-                        PLProfiles.current.selectedProfileName = profileName;
-                    });
-                }
-                
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if ([modLoaderId isEqualToString:@"forge"]) {
-                        [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
-                    } else if ([modLoaderId isEqualToString:@"fabric"]) {
-                        [weakSelf autoInstallFabricWithFullString:finalVersionString];
+                if (!primaryModLoader) primaryModLoader = modLoaders[0];
+                NSString *rawId = primaryModLoader[@"id"] ?: @"";
+                NSRange dashRange = [rawId rangeOfString:@"-"];
+                if (dashRange.location != NSNotFound) {
+                    NSString *loaderName = [rawId substringToIndex:dashRange.location];
+                    NSString *loaderVer = [rawId substringFromIndex:(dashRange.location + 1)];
+                    if ([loaderName isEqualToString:@"forge"]) {
+                        modLoaderId = @"forge";
+                        modLoaderVersion = loaderVer;
+                    } else if ([loaderName isEqualToString:@"fabric"]) {
+                        modLoaderId = @"fabric";
+                        modLoaderVersion = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVer, vanillaVersion];
                     } else {
-                        NSLog(@"Auto-install: Unrecognized loader: %@", modLoaderId);
+                        modLoaderId = loaderName;
+                        modLoaderVersion = loaderVer;
                     }
-                });
+                } else {
+                    modLoaderId = rawId;
+                    modLoaderVersion = rawId;
+                }
+            }
+        }
+        NSString *finalVersionString = @"";
+        if ([modLoaderId isEqualToString:@"forge"]) {
+            finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, modLoaderVersion];
+        } else if ([modLoaderId isEqualToString:@"fabric"]) {
+            finalVersionString = modLoaderVersion;
+        } else {
+            finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
+        }
+        
+        NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
+        if (profileName.length > 0) {
+            NSDictionary *profileInfo = @{
+                @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
+                @"name": profileName,
+                @"lastVersionId": finalVersionString,
+                @"icon": @""
+            };
+            dispatch_async(dispatch_get_main_queue(), ^{
+                PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
+                PLProfiles.current.selectedProfileName = profileName;
             });
         }
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([modLoaderId isEqualToString:@"forge"]) {
+                [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
+            } else if ([modLoaderId isEqualToString:@"fabric"]) {
+                [weakSelf autoInstallFabricWithFullString:finalVersionString];
+            } else {
+                NSLog(@"Auto-install: Unrecognized loader: %@", modLoaderId);
+            }
+        });
+        
+        if (completion) completion(nil);
     });
 }
 
-#pragma mark - Search, Load Details, and Install (Restored Implementations)
+#pragma mark - Search, Load Details, and Install
 
 - (void)searchModWithFilters:(NSDictionary *)searchFilters
          previousPageResult:(NSMutableArray *)prevResult
-                 completion:(void (^)(NSMutableArray *results, NSError *error))completion {
+                 completion:(void (^)(NSMutableArray *, NSError *))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int limit = CURSEFORGE_PAGINATION_SIZE;
         NSString *query = searchFilters[@"name"] ?: @"";
@@ -514,7 +476,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 }
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item
-              completion:(void (^)(NSError *error))completion {
+              completion:(void (^)(NSError *))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *modId = [NSString stringWithFormat:@"%@", item[@"id"]];
         [self getEndpoint:[NSString stringWithFormat:@"mods/%@/files", modId] params:nil completion:^(id response, NSError *error) {
@@ -575,17 +537,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 }
 
 - (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion
-                      completion:(void (^)(NSError *error))completion {
-    NSArray *versionNames = modDetail[@"versionNames"];
-    if (selectedVersion >= versionNames.count) {
-        if (completion) {
-            NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
-                                                 code:100
-                                             userInfo:@{NSLocalizedDescriptionKey: @"Selected version index is out of bounds."}];
-            completion(error);
-        }
-        return;
-    }
+                      completion:(void (^)(NSError *))completion {
     // Forward installation via notification.
     NSDictionary *userInfo = @{@"detail": modDetail, @"index": @(selectedVersion)};
     [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack" object:self userInfo:userInfo];
