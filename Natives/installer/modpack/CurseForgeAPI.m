@@ -249,6 +249,68 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     return;
                 }
                 
+                // *** NEW: Create profile BEFORE starting downloads ***
+                NSDictionary *minecraft = manifestDict[@"minecraft"];
+                NSString *vanillaVersion = @"";
+                NSString *modLoaderId = @"";
+                NSString *modLoaderVersion = @"";
+                if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
+                    vanillaVersion = minecraft[@"version"] ?: @"";
+                    NSArray *modLoaders = minecraft[@"modLoaders"];
+                    NSDictionary *primaryModLoader = nil;
+                    if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
+                        for (NSDictionary *loader in modLoaders) {
+                            if ([loader[@"primary"] boolValue]) {
+                                primaryModLoader = loader;
+                                break;
+                            }
+                        }
+                        if (!primaryModLoader) { primaryModLoader = modLoaders[0]; }
+                        NSString *rawId = primaryModLoader[@"id"] ?: @"";
+                        NSRange dashRange = [rawId rangeOfString:@"-"];
+                        if (dashRange.location != NSNotFound) {
+                            NSString *loaderName = [rawId substringToIndex:dashRange.location];
+                            NSString *loaderVer = [rawId substringFromIndex:(dashRange.location + 1)];
+                            if ([loaderName isEqualToString:@"forge"]) {
+                                modLoaderId = @"forge";
+                                modLoaderVersion = loaderVer;
+                            } else if ([loaderName isEqualToString:@"fabric"]) {
+                                modLoaderId = @"fabric";
+                                modLoaderVersion = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVer, vanillaVersion];
+                            } else {
+                                modLoaderId = loaderName;
+                                modLoaderVersion = loaderVer;
+                            }
+                        } else {
+                            modLoaderId = rawId;
+                            modLoaderVersion = rawId;
+                        }
+                    }
+                }
+                NSString *finalVersionString = @"";
+                if ([modLoaderId isEqualToString:@"forge"]) {
+                    finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, modLoaderVersion];
+                } else if ([modLoaderId isEqualToString:@"fabric"]) {
+                    finalVersionString = modLoaderVersion;
+                } else {
+                    finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
+                }
+                
+                NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
+                if (profileName.length > 0) {
+                    NSDictionary *profileInfo = @{
+                        @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
+                        @"name": profileName,
+                        @"lastVersionId": finalVersionString,
+                        @"icon": @""
+                    };
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        NSLog(@"Setting profile: %@", profileName);
+                        PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
+                        PLProfiles.current.selectedProfileName = profileName;
+                    });
+                }
+                
                 // Proceed with downloads and other logic
                 NSArray *allFiles = manifestDict[@"files"];
                 NSMutableArray *files = [NSMutableArray new];
@@ -351,7 +413,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         [downloader finalizeDownloads];
                     });
                     
-                    // Dependency download and profile creation.
+                    // Dependency download (unchanged)
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
                         NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json",
@@ -366,68 +428,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                     }
                     
-                    NSDictionary *minecraft = manifestDict[@"minecraft"];
-                    NSString *vanillaVersion = @"";
-                    NSString *modLoaderId = @"";
-                    NSString *modLoaderVersion = @"";
-                    if (minecraft && [minecraft isKindOfClass:[NSDictionary class]]) {
-                        vanillaVersion = minecraft[@"version"] ?: @"";
-                        NSArray *modLoaders = minecraft[@"modLoaders"];
-                        NSDictionary *primaryModLoader = nil;
-                        if ([modLoaders isKindOfClass:[NSArray class]] && modLoaders.count > 0) {
-                            for (NSDictionary *loader in modLoaders) {
-                                if ([loader[@"primary"] boolValue]) {
-                                    primaryModLoader = loader;
-                                    break;
-                                }
-                            }
-                            if (!primaryModLoader) { primaryModLoader = modLoaders[0]; }
-                            NSString *rawId = primaryModLoader[@"id"] ?: @"";
-                            NSRange dashRange = [rawId rangeOfString:@"-"];
-                            if (dashRange.location != NSNotFound) {
-                                NSString *loaderName = [rawId substringToIndex:dashRange.location];
-                                NSString *loaderVer = [rawId substringFromIndex:(dashRange.location + 1)];
-                                if ([loaderName isEqualToString:@"forge"]) {
-                                    modLoaderId = @"forge";
-                                    modLoaderVersion = loaderVer;
-                                } else if ([loaderName isEqualToString:@"fabric"]) {
-                                    modLoaderId = @"fabric";
-                                    modLoaderVersion = [NSString stringWithFormat:@"fabric-loader-%@-%@", loaderVer, vanillaVersion];
-                                } else {
-                                    modLoaderId = loaderName;
-                                    modLoaderVersion = loaderVer;
-                                }
-                            } else {
-                                modLoaderId = rawId;
-                                modLoaderVersion = rawId;
-                            }
-                        }
-                    }
-                    NSString *finalVersionString = @"";
-                    if ([modLoaderId isEqualToString:@"forge"]) {
-                        finalVersionString = [NSString stringWithFormat:@"%@-forge-%@", vanillaVersion, modLoaderVersion];
-                    } else if ([modLoaderId isEqualToString:@"fabric"]) {
-                        finalVersionString = modLoaderVersion;
-                    } else {
-                        finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
-                    }
-                    
-                    // Fixed profile gameDir: include "custom_gamedir" in the path.
-                    NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
-                    if (profileName.length > 0) {
-                        NSDictionary *profileInfo = @{
-                            @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
-                            @"name": profileName,
-                            @"lastVersionId": finalVersionString,
-                            @"icon": @""
-                        };
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            NSLog(@"Setting profile: %@", profileName);
-                            PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
-                            PLProfiles.current.selectedProfileName = profileName;
-                        });
-                    }
-                    
+                    // Auto-install loader (unchanged)
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([modLoaderId isEqualToString:@"forge"]) {
                             [weakSelf autoInstallForge:vanillaVersion loaderVersion:modLoaderVersion];
