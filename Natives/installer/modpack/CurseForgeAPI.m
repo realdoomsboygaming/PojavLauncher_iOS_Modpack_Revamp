@@ -263,7 +263,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 NSString *modpackFolderName = destPath.lastPathComponent;
                 dispatch_group_t group = dispatch_group_create();
-                __block NSUInteger completedDownloads = 0; // Track completed URL retrievals
                 
                 for (NSDictionary *fileEntry in files) {
                     dispatch_group_enter(group);
@@ -274,15 +273,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
                                                  fileID:[fileID unsignedLongLongValue]
                                              completion:^(NSString *url, NSError *error) {
-                        completedDownloads++;
-                        // When one file remains (all but one have been processed), trigger finalization.
-                        if (completedDownloads == files.count - 1) {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                NSLog(@"One file remaining, proceeding to the next step.");
-                                [downloader finalizeDownloads];
-                            });
-                        }
-                        
                         if (!url && required) {
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 NSString *modName = fileEntry[@"fileName"] ?: @"UnknownFile";
@@ -292,11 +282,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             dispatch_group_leave(group);
                             return;
                         } else if (!url) {
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                if (!downloader.progress.cancelled) {
-                                    downloader.progress.completedUnitCount++;
-                                }
-                            });
                             dispatch_group_leave(group);
                             return;
                         }
@@ -319,32 +304,27 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (rawSize == 0) { rawSize = 1; }
                         
                         @try {
-                            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url
-                                                                                       size:rawSize
-                                                                                        sha:nil
-                                                                                     altName:nil
-                                                                                       toPath:destinationPath];
-                            if (task) {
-                                dispatch_async(dispatch_get_main_queue(), ^{
-                                    NSLog(@"Starting download for %@", relativePath);
-                                    [task resume];
-                                });
-                            } else {
-                                dispatch_async(dispatch_get_main_queue(), ^{
-                                    if (!downloader.progress.cancelled) {
-                                        downloader.progress.completedUnitCount++;
-                                    }
-                                });
-                            }
+                            // Once URL is retrieved, create a download task and wait for it.
+                            [downloader createDownloadTask:url
+                                                      size:rawSize
+                                                       sha:nil
+                                                   altName:nil
+                                                     toPath:destinationPath
+                                                   success:^{
+                                // Download task for this file is complete.
+                                dispatch_group_leave(group);
+                            }];
+                            
+                            // If no task was created, we still leave.
+                            dispatch_group_leave(group);
                         } @catch (NSException *ex) {
                             NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
+                            dispatch_group_leave(group);
                         }
-                        
-                        dispatch_group_leave(group);
                     }];
                 }
                 
-                // Step 4: Finalize after downloads.
+                // Finalize after all download tasks have completed.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
@@ -355,6 +335,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         
                         // Remove the modpack zip file.
                         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:nil];
+                        
+                        // Finalize downloads.
+                        [downloader finalizeDownloads];
                     });
                     
                     // Dependency download and profile creation.
@@ -649,6 +632,16 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     NSArray *modLoaders = minecraft[@"modLoaders"];
     if (![modLoaders isKindOfClass:[NSArray class]] || modLoaders.count < 1) return NO;
     return YES;
+}
+
+#pragma mark - asyncExtractManifestFromPackage (stub)
+
+- (void)asyncExtractManifestFromPackage:(NSString *)packagePath
+                             completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
+    // This method is declared but not used in the current flow.
+    if (completion) {
+        completion(nil, nil);
+    }
 }
 
 @end
