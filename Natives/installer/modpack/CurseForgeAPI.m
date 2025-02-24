@@ -309,17 +309,25 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (rawSize == 0) { rawSize = 1; }
                         
                         @try {
+                            // Enter group for the actual download task.
+                            dispatch_group_enter(group);
                             NSURLSessionDownloadTask *task = [downloader createDownloadTask:url
                                                                                        size:rawSize
                                                                                         sha:nil
                                                                                      altName:nil
-                                                                                       toPath:destinationPath];
+                                                                                       toPath:destinationPath
+                                                                                     success:^{
+                                // Download task completed.
+                                dispatch_group_leave(group);
+                            }];
                             if (task) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     NSLog(@"Starting download for %@", relativePath);
                                     [task resume];
                                 });
                             } else {
+                                // No task created, so leave immediately.
+                                dispatch_group_leave(group);
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     if (!downloader.progress.cancelled) {
                                         downloader.progress.completedUnitCount++;
@@ -328,13 +336,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             }
                         } @catch (NSException *ex) {
                             NSLog(@"Exception creating/resuming task for %@: %@", relativePath, ex);
+                            dispatch_group_leave(group);
                         }
                         
-                        dispatch_group_leave(group);
+                        dispatch_group_leave(group); // Leave group for URL retrieval.
                     }];
                 }
                 
-                // Finalize after all files have been processed.
+                // Finalize after all download tasks have completed.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
