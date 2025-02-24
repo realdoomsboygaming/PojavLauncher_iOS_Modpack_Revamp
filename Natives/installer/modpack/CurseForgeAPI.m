@@ -308,6 +308,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         NSLog(@"Setting profile: %@", profileName);
                         PLProfiles.current.profiles[profileName] = [profileInfo mutableCopy];
                         PLProfiles.current.selectedProfileName = profileName;
+                        [PLProfiles.current save];
                     });
                 }
                 
