@@ -263,23 +263,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 NSString *modpackFolderName = destPath.lastPathComponent;
                 dispatch_group_t group = dispatch_group_create();
-                __block NSUInteger lastCompletedCount = 0; // Track the last completed count
-                __block BOOL isTimeoutTriggered = NO; // Flag to prevent multiple timeouts
-                
-                // Create a dispatch source timer for the timeout
-                dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
-                dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1 * NSEC_PER_SEC);
-                dispatch_source_set_event_handler(timer, ^{
-                    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                        if (lastCompletedCount == downloader.progress.completedUnitCount && !isTimeoutTriggered) {
-                            isTimeoutTriggered = YES; // Prevent multiple triggers
-                            NSLog(@"Timeout: No new files downloaded in the last 10 seconds. Proceeding to the next step.");
-                            dispatch_group_leave(group); // Trigger the group to proceed
-                        }
-                        lastCompletedCount = downloader.progress.completedUnitCount; // Update the last completed count
-                    });
-                });
-                dispatch_resume(timer);
+                __block NSUInteger completedDownloads = 0; // Track completed URL retrievals
                 
                 for (NSDictionary *fileEntry in files) {
                     dispatch_group_enter(group);
@@ -290,6 +274,15 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
                                                  fileID:[fileID unsignedLongLongValue]
                                              completion:^(NSString *url, NSError *error) {
+                        completedDownloads++;
+                        // When one file remains (all but one have been processed), trigger finalization.
+                        if (completedDownloads == files.count - 1) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                NSLog(@"One file remaining, proceeding to the next step.");
+                                [downloader finalizeDownloads];
+                            });
+                        }
+                        
                         if (!url && required) {
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 NSString *modName = fileEntry[@"fileName"] ?: @"UnknownFile";
@@ -353,7 +346,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                 
                 // Step 4: Finalize after downloads.
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    dispatch_source_cancel(timer); // Cancel the timer
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
