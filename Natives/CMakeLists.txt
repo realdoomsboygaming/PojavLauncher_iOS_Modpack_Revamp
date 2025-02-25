@@ -134,6 +134,7 @@ add_executable(PojavLauncher
   installer/modpack/ModpackAPI.m
   installer/modpack/CurseForgeAPI.m
   installer/modpack/ModrinthAPI.m
+  installer/modloader/ModloaderInstaller.m
 
   input/ControllerInput.m
   input/GyroInput.m
