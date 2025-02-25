@@ -18,6 +18,8 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "/installer/modpack/ModloaderInstaller.h" 
+#import "Natives/installer/ForgeInstallViewController.h" 
+#import "Natives/installer/FabricInstallViewController.h"
 
 #include <sys/time.h>
 
