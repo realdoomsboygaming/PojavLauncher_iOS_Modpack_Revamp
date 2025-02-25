@@ -1,6 +1,6 @@
 #import "ModloaderInstaller.h"
 #import "CurseForgeAPI.h"
-#import "FabricInstallViewController.h"
+#import "/installer/FabricInstallViewController.h"
 #import <UIKit/UIKit.h>
 
 @implementation ModloaderInstaller
