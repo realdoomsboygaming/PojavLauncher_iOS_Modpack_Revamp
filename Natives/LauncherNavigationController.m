@@ -44,9 +44,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)updateModloaderInstallStatus;
 - (void)checkAndInstallModloaderIfNeeded;
 
-// The button property (assumed to be declared in the header)
-@property(nonatomic, strong) UIButton *buttonInstall;
-
 @end
 
 @implementation LauncherNavigationController
