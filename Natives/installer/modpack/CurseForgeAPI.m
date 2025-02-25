@@ -6,7 +6,6 @@
 #import "UnzipKit.h"
 #import "AFNetworking.h"
 
-// Minimal helper: save a JSON dictionary to a file. Returns nil on success or an NSError on failure.
 static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:&error];
@@ -29,20 +28,14 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 #define CURSEFORGE_PAGINATION_SIZE 50
 
 @interface CurseForgeAPI ()
-// API key for authentication.
 @property (nonatomic, copy) NSString *apiKey;
-// Private helper methods.
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest;
-- (void)asyncExtractManifestFromPackage:(NSString *)packagePath
-                             completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion;
-- (void)getEndpoint:(NSString *)endpoint
-             params:(NSDictionary *)params
-         completion:(void (^)(id result, NSError *error))completion;
-- (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID
-                                     fileID:(unsigned long long)fileID
-                                 completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
+- (void)asyncExtractManifestFromPackage:(NSString *)packagePath completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion;
+- (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id result, NSError *error))completion;
+- (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID completion:(void (^)(NSString *downloadUrl, NSError *error))completion;
 - (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 - (void)autoInstallFabricWithFullString:(NSString *)fabricString;
+- (void)autoInstallNeoForgeWithVanillaVersion:(NSString *)vanillaVer loaderVersion:(NSString *)neoforgeVer;
 - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath;
 - (NSDictionary *)loadManifestFromDestination:(NSString *)destPath error:(NSError **)error;
 @end
@@ -65,12 +58,9 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 #pragma mark - GET Endpoint
 
-- (void)getEndpoint:(NSString *)endpoint
-             params:(NSDictionary *)params
-         completion:(void (^)(id, NSError *))completion {
+- (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id, NSError *))completion {
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -82,7 +72,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         }
     }
     [manager.requestSerializer setValue:key forHTTPHeaderField:@"x-api-key"];
-    
     NSLog(@"getEndpoint: Requesting %@ with params: %@", url, params);
     [manager GET:url parameters:params headers:nil progress:nil success:^(NSURLSessionTask *task, id responseObject) {
         NSLog(@"getEndpoint: Success for %@: %@", endpoint, responseObject);
@@ -96,23 +85,18 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 #pragma mark - Download URL Generation
 
-- (void)getDownloadUrlForProject:(unsigned long long)projectID
-                          fileID:(unsigned long long)fileID
-                      completion:(void (^)(NSString *, NSError *))completion {
+- (void)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID completion:(void (^)(NSString *, NSError *))completion {
     NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
     __block int attempt = 0;
     __weak typeof(self) weakSelf = self;
     __block void (^attemptBlock)(void) = nil;
     __weak void (^weakAttemptBlock)(void) = nil;
-    
     attemptBlock = [^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             NSLog(@"getDownloadUrlForProject: Self deallocated during request for project %llu, file %llu", projectID, fileID);
             if (completion) {
-                NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
-                                                   code:-1
-                                               userInfo:@{NSLocalizedDescriptionKey: @"Internal error (self was deallocated)."}];
+                NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Internal error (self was deallocated)."}];
                 completion(nil, err);
             }
             return;
@@ -129,8 +113,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                 attempt++;
                 if (attempt < 2) {
                     NSLog(@"getDownloadUrlForProject: Retrying (attempt %d) for project %llu, file %llu", attempt, projectID, fileID);
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                                   strongSelf->_networkQueue, ^{
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), strongSelf->_networkQueue, ^{
                         __strong typeof(weakAttemptBlock) innerBlock = weakAttemptBlock;
                         if (innerBlock) innerBlock();
                     });
@@ -141,19 +124,15 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             }
         }];
     } copy];
-    
     weakAttemptBlock = attemptBlock;
     attemptBlock();
 }
 
-- (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID
-                                     fileID:(unsigned long long)fileID
-                                 completion:(void (^)(NSString *, NSError *))completion {
+- (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID completion:(void (^)(NSString *, NSError *))completion {
     NSString *fallbackUrl = [NSString stringWithFormat:@"https://www.curseforge.com/api/v1/mods/%llu/files/%llu/download", projectID, fileID];
     if (self.apiKey.length > 0) {
         fallbackUrl = [fallbackUrl stringByAppendingFormat:@"?apiKey=%@", self.apiKey];
     }
-    
     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     NSLog(@"handleDownloadUrlFallback: Attempting fallback for project %llu, file %llu", projectID, fileID);
     [self getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
@@ -188,9 +167,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         } else {
             NSLog(@"handleDownloadUrlFallback: Response is not a dictionary: %@", fallbackResponse);
         }
-        
         NSLog(@"handleDownloadUrlFallback: Using fallback URL for project %llu, file %llu: %@", projectID, fileID, fallbackUrl);
-        if (completion) completion(fallbackUrl, nil); // Fallback even if media link fails
+        if (completion) completion(fallbackUrl, nil);
     }];
 }
 
@@ -217,14 +195,11 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 - (void)moveJarFilesToModsFolderInDirectory:(NSString *)destPath {
     NSLog(@"moveJarFilesToModsFolderInDirectory: Deprecated method called for %@", destPath);
-    // Deprecated; no action needed as mods are now downloaded directly to mods folder
 }
 
 #pragma mark - New Order: Extraction, then Manifest, then Downloads
 
-- (void)downloader:(MinecraftResourceDownloadTask *)downloader
-submitDownloadTasksFromPackage:(NSString *)packagePath
-            toPath:(NSString *)destPath {
+- (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         @autoreleasepool {
@@ -238,8 +213,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     return;
                 }
                 NSLog(@"downloader: Extraction completed successfully");
-
-                // Load and verify manifest after extraction
                 NSError *loadError = nil;
                 NSDictionary *manifestDict = [weakSelf loadManifestFromDestination:destPath error:&loadError];
                 if (!manifestDict) {
@@ -257,8 +230,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     return;
                 }
                 NSLog(@"downloader: Manifest loaded and verified");
-
-                // Create mods folder if it doesn't exist
                 NSString *modsDir = [destPath stringByAppendingPathComponent:@"mods"];
                 if (![[NSFileManager defaultManager] fileExistsAtPath:modsDir]) {
                     NSError *createError = nil;
@@ -269,8 +240,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         NSLog(@"downloader: Created mods directory at %@", modsDir);
                     }
                 }
-
-                // Create profile BEFORE starting downloads
                 NSDictionary *minecraft = manifestDict[@"minecraft"];
                 NSString *vanillaVersion = @"";
                 NSString *modLoaderId = @"";
@@ -317,7 +286,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     finalVersionString = [NSString stringWithFormat:@"%@ | %@", vanillaVersion, modLoaderId];
                 }
                 NSLog(@"downloader: Determined version string: %@", finalVersionString);
-
                 NSString *profileName = manifestDict[@"name"] ?: @"Unknown Modpack";
                 if (profileName.length > 0) {
                     NSDictionary *profileInfo = @{
@@ -333,8 +301,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         [PLProfiles.current save];
                     });
                 }
-
-                // Proceed with downloads
                 NSArray *allFiles = manifestDict[@"files"];
                 NSMutableArray *files = [NSMutableArray new];
                 NSMutableSet *uniqueKeys = [NSMutableSet new];
@@ -346,20 +312,14 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                     }
                 }
                 NSLog(@"downloader: Processing %lu unique files", (unsigned long)files.count);
-
                 NSString *modpackFolderName = destPath.lastPathComponent;
                 dispatch_group_t group = dispatch_group_create();
-
                 for (NSDictionary *fileEntry in files) {
                     dispatch_group_enter(group);
-                    
                     NSNumber *projectID = fileEntry[@"projectID"];
                     NSNumber *fileID = fileEntry[@"fileID"];
                     BOOL required = [fileEntry[@"required"] boolValue];
-                    
-                    [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue]
-                                                 fileID:[fileID unsignedLongLongValue]
-                                             completion:^(NSString *url, NSError *error) {
+                    [weakSelf getDownloadUrlForProject:[projectID unsignedLongLongValue] fileID:[fileID unsignedLongLongValue] completion:^(NSString *url, NSError *error) {
                         if (!url && required) {
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 NSString *modName = fileEntry[@"fileName"] ?: @"UnknownFile";
@@ -373,7 +333,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             dispatch_group_leave(group);
                             return;
                         }
-                        
                         NSString *relativePath = fileEntry[@"path"];
                         if (!relativePath || relativePath.length == 0) {
                             relativePath = fileEntry[@"fileName"];
@@ -386,32 +345,21 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         if (components.count > 1 && [[components firstObject] caseInsensitiveCompare:modpackFolderName] == NSOrderedSame) {
                             relativePath = [[components subarrayWithRange:NSMakeRange(1, components.count - 1)] componentsJoinedByString:@"/"];
                         }
-                        
                         NSString *destinationPath;
-                        if ([[relativePath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame &&
-                            ![relativePath hasPrefix:@"mods/"]) {
+                        if ([[relativePath pathExtension] caseInsensitiveCompare:@"jar"] == NSOrderedSame && ![relativePath hasPrefix:@"mods/"]) {
                             destinationPath = [[destPath stringByAppendingPathComponent:@"mods"] stringByAppendingPathComponent:[relativePath lastPathComponent]];
                         } else {
                             destinationPath = [destPath stringByAppendingPathComponent:relativePath];
                         }
                         NSLog(@"downloader: Destination path for download: %@", destinationPath);
-
                         NSUInteger rawSize = [fileEntry[@"fileLength"] unsignedLongLongValue];
                         if (rawSize == 0) { rawSize = 1; }
-                        
                         @try {
-                            // Ensure destination directory exists
                             NSString *destDir = [destinationPath stringByDeletingLastPathComponent];
                             if (![[NSFileManager defaultManager] fileExistsAtPath:destDir]) {
                                 [[NSFileManager defaultManager] createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
                             }
-                            
-                            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url
-                                                                                       size:rawSize
-                                                                                        sha:nil
-                                                                                     altName:nil
-                                                                                       toPath:destinationPath
-                                                                                     success:^{
+                            NSURLSessionDownloadTask *task = [downloader createDownloadTask:url size:rawSize sha:nil altName:nil toPath:destinationPath success:^{
                                 NSLog(@"downloader: Download completed for %@", destinationPath);
                                 dispatch_group_leave(group);
                             }];
@@ -435,13 +383,11 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         }
                     }];
                 }
-                
                 dispatch_group_notify(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     dispatch_async(dispatch_get_main_queue(), ^{
                         downloader.progress.completedUnitCount = downloader.progress.totalUnitCount;
                         downloader.textProgress.completedUnitCount = downloader.progress.totalUnitCount;
                         NSLog(@"downloader: All downloads completed");
-
                         NSError *removeError = nil;
                         [[NSFileManager defaultManager] removeItemAtPath:packagePath error:&removeError];
                         if (removeError) {
@@ -449,15 +395,11 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         } else {
                             NSLog(@"downloader: Removed package file %@", packagePath);
                         }
-                        
                         [downloader finalizeDownloads];
                     });
-                    
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
-                        NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json",
-                                              [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                                              depInfo[@"id"]];
+                        NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
                         if (depTask) {
                             dispatch_async(dispatch_get_main_queue(), ^{
@@ -468,7 +410,6 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                             NSLog(@"downloader: Failed to create dependency download task for %@", jsonPath);
                         }
                     }
-                    
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([modLoaderId isEqualToString:@"forge"]) {
                             NSLog(@"downloader: Auto-installing Forge");
@@ -476,6 +417,9 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
                         } else if ([modLoaderId isEqualToString:@"fabric"]) {
                             NSLog(@"downloader: Auto-installing Fabric");
                             [weakSelf autoInstallFabricWithFullString:finalVersionString];
+                        } else if ([modLoaderId isEqualToString:@"neoforge"]) {
+                            NSLog(@"downloader: Auto-installing NeoForge");
+                            [weakSelf autoInstallNeoForgeWithVanillaVersion:vanillaVersion loaderVersion:modLoaderVersion];
                         } else {
                             NSLog(@"downloader: Unrecognized loader: %@", modLoaderId);
                         }
@@ -488,9 +432,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
 
 #pragma mark - Search, Load Details, and Install
 
-- (void)searchModWithFilters:(NSDictionary *)searchFilters
-         previousPageResult:(NSMutableArray *)prevResult
-                 completion:(void (^)(NSMutableArray *results, NSError *error))completion {
+- (void)searchModWithFilters:(NSDictionary *)searchFilters previousPageResult:(NSMutableArray *)prevResult completion:(void (^)(NSMutableArray *results, NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int limit = CURSEFORGE_PAGINATION_SIZE;
         NSString *query = searchFilters[@"name"] ?: @"";
@@ -546,8 +488,7 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     });
 }
 
-- (void)loadDetailsOfMod:(NSMutableDictionary *)item
-              completion:(void (^)(NSError *error))completion {
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item completion:(void (^)(NSError *error))completion {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *modId = [NSString stringWithFormat:@"%@", item[@"id"]];
         NSLog(@"loadDetailsOfMod: Loading details for mod ID %@", modId);
@@ -610,15 +551,12 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     });
 }
 
-- (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion
-                      completion:(void (^)(NSError *error))completion {
+- (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion completion:(void (^)(NSError *error))completion {
     NSArray *versionNames = modDetail[@"versionNames"];
     if (selectedVersion >= versionNames.count) {
         NSLog(@"installModpackFromDetail: Invalid version index %lu (max %lu)", (unsigned long)selectedVersion, (unsigned long)versionNames.count);
         if (completion) {
-            NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain"
-                                                 code:100
-                                             userInfo:@{NSLocalizedDescriptionKey: @"Selected version index is out of bounds."}];
+            NSError *error = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:100 userInfo:@{NSLocalizedDescriptionKey: @"Selected version index is out of bounds."}];
             completion(error);
         }
         return;
@@ -639,11 +577,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         return;
     }
     NSString *finalId = [NSString stringWithFormat:@"%@-forge-%@", vanillaVer, forgeVer];
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
-                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                          finalId, finalId];
-    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
-                              withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], finalId, finalId];
+    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     NSDictionary *forgeDict = @{
         @"id": finalId,
         @"type": @"custom",
@@ -662,11 +597,8 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
         NSLog(@"autoInstallFabric: Missing fabric version string");
         return;
     }
-    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json",
-                          [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")],
-                          fabricString, fabricString];
-    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent
-                              withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], fabricString, fabricString];
+    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     NSDictionary *fabricDict = @{
         @"id": fabricString,
         @"type": @"custom",
@@ -676,6 +608,27 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     NSError *writeErr = saveJSONToFile(fabricDict, jsonPath);
     if (writeErr) {
         NSLog(@"autoInstallFabric: Failed to write Fabric JSON: %@", writeErr);
+    }
+}
+
+- (void)autoInstallNeoForgeWithVanillaVersion:(NSString *)vanillaVer loaderVersion:(NSString *)neoforgeVer {
+    if (!vanillaVer.length || !neoforgeVer.length) {
+        NSLog(@"autoInstallNeoForge: Missing version information (vanilla: %@, neoforge: %@)", vanillaVer, neoforgeVer);
+        return;
+    }
+    NSString *finalId = [NSString stringWithFormat:@"%@-neoforge-%@", vanillaVer, neoforgeVer];
+    NSString *jsonPath = [NSString stringWithFormat:@"%@/versions/%@/%@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], finalId, finalId];
+    [[NSFileManager defaultManager] createDirectoryAtPath:jsonPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    NSDictionary *neoforgeDict = @{
+        @"id": finalId,
+        @"type": @"custom",
+        @"minecraft": vanillaVer,
+        @"loader": @"neoforge",
+        @"loaderVersion": neoforgeVer
+    };
+    NSError *writeErr = saveJSONToFile(neoforgeDict, jsonPath);
+    if (writeErr) {
+        NSLog(@"autoInstallNeoForge: Failed to write NeoForge JSON: %@", writeErr);
     }
 }
 
@@ -712,13 +665,12 @@ submitDownloadTasksFromPackage:(NSString *)packagePath
     return YES;
 }
 
-#pragma mark - asyncExtractManifestFromPackage (stub)
+#pragma mark - asyncExtractManifestFromPackage
 
-- (void)asyncExtractManifestFromPackage:(NSString *)packagePath
-                             completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
+- (void)asyncExtractManifestFromPackage:(NSString *)packagePath completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion {
     NSLog(@"asyncExtractManifestFromPackage: Stub called for %@", packagePath);
     if (completion) {
-        completion(nil, nil); // Stub implementation
+        completion(nil, nil);
     }
 }
 
