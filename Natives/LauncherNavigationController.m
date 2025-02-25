@@ -261,7 +261,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         return;
     }
     
-    [self setInteractionEnabled:YES forDownloading:YES];
+    [self setInteractionEnabled:NO forDownloading:YES];
     
     NSString *versionId = PLProfiles.current.profiles[self.versionTextField.text][@"lastVersionId"];
     NSDictionary *object = [[remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(id == %@)", versionId]] firstObject];
