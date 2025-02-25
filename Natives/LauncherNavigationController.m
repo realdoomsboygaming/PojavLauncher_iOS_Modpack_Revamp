@@ -18,20 +18,21 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "installer/modpack/ModloaderInstaller.h" 
+#import "installer/modpack/CurseForgeAPI.h"  
 #import "installer/ForgeInstallViewController.h" 
 #import "installer/FabricInstallViewController.h"
 
 #include <sys/time.h>
 
-#define AUTORESIZE_MASKS UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin
+#define AUTORESIZE_MASKS (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin)
 
 static void *ProgressObserverContext = &ProgressObserverContext;
 
 @interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
-@property(nonatomic) MinecraftResourceDownloadTask* task;
-@property(nonatomic) DownloadProgressViewController* progressVC;
-@property(nonatomic) PLPickerView* versionPickerView;
-@property(nonatomic) UITextField* versionTextField;
+@property(nonatomic) MinecraftResourceDownloadTask *task;
+@property(nonatomic) DownloadProgressViewController *progressVC;
+@property(nonatomic) PLPickerView *versionPickerView;
+@property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
 @end
 
@@ -101,7 +102,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     
     if ([BaseAuthenticator.current isKindOfClass:MicrosoftAuthenticator.class]) {
         [self setInteractionEnabled:NO forDownloading:NO];
-        id callback = ^(NSString* status, BOOL success) {
+        id callback = ^(NSString *status, BOOL success) {
             self.progressText.text = status;
             if (status == nil) {
                 [self setInteractionEnabled:YES forDownloading:NO];
@@ -111,6 +112,18 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         };
         [BaseAuthenticator.current refreshTokenWithCallback:callback];
     }
+}
+
+#pragma mark - New: Automatic Forge Installation (for CurseForge)
+- (void)autoInstallForgeWithVanillaVersion:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer {
+    NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
+    if (!apiKey) {
+        NSLog(@"No CurseForge API key available for automatic Forge installation.");
+        return;
+    }
+    // Create a temporary CurseForgeAPI instance and call autoInstallForge.
+    CurseForgeAPI *cfAPI = [[CurseForgeAPI alloc] initWithAPIKey:apiKey];
+    [cfAPI autoInstallForge:vanillaVer loaderVersion:forgeVer];
 }
 
 #pragma mark - New: Check and Install Modloader
@@ -129,17 +142,23 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:fullPath error:&error];
     if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
         NSString *loaderType = installerInfo[@"loaderType"];
-        // Present the appropriate installer view controller based on loaderType.
         if ([loaderType isEqualToString:@"forge"]) {
-            // Present Forge installer.
-            ForgeInstallViewController *vc = [ForgeInstallViewController new];
-            [self presentViewController:vc animated:YES completion:nil];
+            // Automatically install Forge without user input.
+            NSString *versionString = installerInfo[@"versionString"];
+            NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
+            if (components.count == 2) {
+                NSString *vanillaVer = components[0];
+                NSString *forgeVer = components[1];
+                [self autoInstallForgeWithVanillaVersion:vanillaVer loaderVersion:forgeVer];
+            } else {
+                NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
+            }
         } else if ([loaderType isEqualToString:@"fabric"]) {
-            // Present Fabric installer.
+            // Present Fabric installer interface.
             FabricInstallViewController *vc = [FabricInstallViewController new];
             [self presentViewController:vc animated:YES completion:nil];
         }
-        // Remove the installer file after launching the installer.
+        // Remove the installer file after processing.
         NSString *installerPath = [fullPath stringByAppendingPathComponent:@"modloader_installer.json"];
         [[NSFileManager defaultManager] removeItemAtPath:installerPath error:nil];
     }
@@ -149,7 +168,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    // Check for mod loader installer file and launch installer if needed.
     [self checkAndInstallModloaderIfNeeded];
 }
 
@@ -160,9 +178,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [PLProfiles updateCurrent];
     [self.versionPickerView reloadAllComponents];
     self.profileSelectedAt = [PLProfiles.current.profiles.allKeys indexOfObject:PLProfiles.current.selectedProfileName];
-    if (self.profileSelectedAt == -1) {
-        return;
-    }
+    if (self.profileSelectedAt == -1) return;
     [self.versionPickerView selectRow:self.profileSelectedAt inComponent:0 animated:NO];
     [self pickerView:self.versionPickerView didSelectRow:self.profileSelectedAt inComponent:0];
 }
@@ -222,8 +238,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)enterModInstaller {
     UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc]
-        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
-        asCopy:YES];
+                                                        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
+                                                        asCopy:YES];
     documentPicker.delegate = self;
     documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
     [self presentViewController:documentPicker animated:YES completion:nil];
@@ -233,9 +249,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
     vc.filepath = path;
     vc.hitEnterAfterWindowShown = hitEnter;
-    if (!vc.requiredJavaVersion) {
-        return;
-    }
+    if (!vc.requiredJavaVersion) return;
     [self invokeAfterJITEnabled:^{
         vc.modalPresentationStyle = UIModalPresentationFullScreen;
         NSLog(@"[ModInstaller] launching %@", vc.filepath);
@@ -362,9 +376,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 - (void)receiveNotification:(NSNotification *)notification {
-    if (![notification.name isEqualToString:@"InstallModpack"]) {
-        return;
-    }
+    if (![notification.name isEqualToString:@"InstallModpack"]) return;
     [self setInteractionEnabled:NO forDownloading:YES];
     self.task = [MinecraftResourceDownloadTask new];
     NSDictionary *userInfo = notification.userInfo;
