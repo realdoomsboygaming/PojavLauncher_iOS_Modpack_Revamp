@@ -74,20 +74,6 @@
     item[@"versionDetailsLoaded"] = @(YES);
 }
 
-#pragma mark - New: Install Modpack from Detail
-// This method was missing, causing mod download tasks not to be reported.
-// It posts the "InstallModpack" notification, similar to CurseForgeAPI.
-- (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion {
-    NSArray *versionNames = modDetail[@"versionNames"];
-    if (selectedVersion >= versionNames.count) {
-        NSLog(@"installModpackFromDetail: Invalid version index %lu (max %lu)", (unsigned long)selectedVersion, (unsigned long)versionNames.count);
-        return;
-    }
-    NSLog(@"installModpackFromDetail: Installing modpack %@ at version index %lu", modDetail[@"title"], (unsigned long)selectedVersion);
-    NSDictionary *userInfo = @{@"detail": modDetail, @"index": @(selectedVersion)};
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack" object:self userInfo:userInfo];
-}
-
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     NSError *error = nil;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
@@ -106,7 +92,15 @@
     NSArray *filesArray = indexDict[@"files"];
     downloader.progress.totalUnitCount = filesArray.count;
     for (NSDictionary *indexFile in filesArray) {
-        NSString *url = [indexFile[@"downloads"] firstObject] ?: @"";
+        // Fix: correctly extract the download URL whether "downloads" is an array or a dictionary.
+        NSString *url = @"";
+        id downloads = indexFile[@"downloads"];
+        if ([downloads isKindOfClass:[NSArray class]]) {
+            url = [downloads firstObject] ?: @"";
+        } else if ([downloads isKindOfClass:[NSDictionary class]]) {
+            url = downloads[@"primary"] ?: @"";
+        }
+        
         NSString *sha = indexFile[@"hashes"][@"sha1"] ?: @"";
         NSString *path = [destPath stringByAppendingPathComponent:indexFile[@"path"] ?: @""];
         NSUInteger size = [indexFile[@"fileSize"] unsignedLongLongValue];
