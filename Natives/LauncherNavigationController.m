@@ -165,6 +165,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [targetToolbar addSubview:self.progressViewMain];
     
     // Configure the play/install button (buttonInstall)
+    self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
