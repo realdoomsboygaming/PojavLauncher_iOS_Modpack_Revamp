@@ -1,6 +1,3 @@
-IOS 14 only, no additional dependencies. Fix any bugs you spot and add additional logging. 
-PLease provide the full code in return
-
 #import "MinecraftResourceDownloadTask.h"
 #import "ModrinthAPI.h"
 #import "PLProfiles.h"
