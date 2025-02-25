@@ -30,14 +30,17 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 @interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
 
-// Only redeclare properties that are not declared in the header.
+// Properties already declared in the header (buttonInstall, progressViewMain, progressText)
+// are not redeclared here.
+
 @property(nonatomic) MinecraftResourceDownloadTask *task;
 @property(nonatomic) DownloadProgressViewController *progressVC;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
 
-// Do not redeclare buttonInstall, progressViewMain, or progressText here since they are in the header.
+// Declare the modloaderInstallPending property here
+@property(nonatomic, assign) BOOL modloaderInstallPending;
 
 #pragma mark - Modloader Installation
 - (void)updateModloaderInstallStatus;
