@@ -32,14 +32,13 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 // Properties already declared in the header (buttonInstall, progressViewMain, progressText)
 // are not redeclared here.
-
 @property(nonatomic) MinecraftResourceDownloadTask *task;
 @property(nonatomic) DownloadProgressViewController *progressVC;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
 
-// Declare the modloaderInstallPending property here
+// Declare the modloaderInstallPending property for internal use.
 @property(nonatomic, assign) BOOL modloaderInstallPending;
 
 #pragma mark - Modloader Installation
@@ -95,34 +94,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         gameDir = [gameDir substringFromIndex:2];
     }
     NSString *fullPath = [modpackPath stringByAppendingPathComponent:gameDir];
-    NSError *error = nil;
-    NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:fullPath error:&error];
-    if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
-        NSString *loaderType = installerInfo[@"loaderType"];
-        if ([loaderType isEqualToString:@"forge"]) {
-            NSString *versionString = installerInfo[@"versionString"];
-            NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
-            if (components.count == 2) {
-                NSString *vanillaVer = components[0];
-                NSString *forgeVer = components[1];
-                NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
-                if (apiKey) {
-                    CurseForgeAPI *cfAPI = [[CurseForgeAPI alloc] initWithAPIKey:apiKey];
-                    [cfAPI autoInstallForge:vanillaVer loaderVersion:forgeVer];
-                } else {
-                    NSLog(@"No CurseForge API key available for automatic Forge installation.");
-                }
-            } else {
-                NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
-            }
-        } else if ([loaderType isEqualToString:@"fabric"]) {
-            FabricInstallViewController *vc = [FabricInstallViewController new];
-            [self presentViewController:vc animated:YES completion:nil];
-        }
-        // Remove installer file after processing.
-        NSString *installerPath = [fullPath stringByAppendingPathComponent:@"modloader_installer.json"];
-        [[NSFileManager defaultManager] removeItemAtPath:installerPath error:nil];
-    }
+    // Use the ModloaderInstaller to perform the installation process.
+    [ModloaderInstaller performModloaderInstallationForModpackDirectory:fullPath fromViewController:self];
 }
 
 #pragma mark - View Lifecycle
@@ -134,7 +107,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
     }
     
-    // Initialize version text field
+    // Initialize version text field.
     self.versionTextField = [[PickTextField alloc] initWithFrame:CGRectMake(4, 4, self.toolbar.frame.size.width * 0.8 - 8, self.toolbar.frame.size.height - 8)];
     [self.versionTextField addTarget:self.versionTextField action:@selector(resignFirstResponder) forControlEvents:UIControlEventEditingDidEndOnExit];
     self.versionTextField.autoresizingMask = AUTORESIZE_MASKS;
@@ -146,7 +119,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.versionTextField.rightViewMode = UITextFieldViewModeAlways;
     self.versionTextField.textAlignment = NSTextAlignmentCenter;
     
-    // Initialize version picker
+    // Initialize version picker.
     self.versionPickerView = [[PLPickerView alloc] init];
     self.versionPickerView.delegate = self;
     self.versionPickerView.dataSource = self;
@@ -163,24 +136,24 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     UIView *targetToolbar = self.toolbar;
     [targetToolbar addSubview:self.versionTextField];
     
-    // Initialize progress view
+    // Initialize progress view.
     self.progressViewMain = [[UIProgressView alloc] initWithFrame:CGRectMake(0, 0, self.toolbar.frame.size.width, 4)];
     self.progressViewMain.autoresizingMask = AUTORESIZE_MASKS;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
     
-    // Initialize the play/install button (buttonInstall)
+    // Initialize the play/install button.
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
-    // The frame will be adjusted in viewDidLayoutSubviews
+    // The frame will be adjusted in viewDidLayoutSubviews.
     self.buttonInstall.tintColor = UIColor.whiteColor;
     self.buttonInstall.enabled = NO;
     [self.buttonInstall addTarget:self action:@selector(performInstallOrShowDetails:) forControlEvents:UIControlEventPrimaryActionTriggered];
     [targetToolbar addSubview:self.buttonInstall];
     
-    // Initialize progress text label
+    // Initialize progress text label.
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
     self.progressText.adjustsFontSizeToFitWidth = YES;
     self.progressText.autoresizingMask = AUTORESIZE_MASKS;
@@ -255,6 +228,33 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         return;
     }
     
+    // Check if the modloader installer file exists and indicates installation is needed.
+    NSDictionary *profile = PLProfiles.current.profiles[PLProfiles.current.selectedProfileName];
+    NSString *gameDir = profile[@"gameDir"];
+    if (gameDir.length) {
+        // Construct the full modpack path.
+        NSString *modpackPath = [[NSFileManager defaultManager] currentDirectoryPath];
+        if ([gameDir hasPrefix:@"./"]) {
+            gameDir = [gameDir substringFromIndex:2];
+        }
+        NSString *fullPath = [modpackPath stringByAppendingPathComponent:gameDir];
+        NSError *readError = nil;
+        NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:fullPath error:&readError];
+        if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"Modloader Installation", nil)
+                                                                           message:localize(@"In order to play, the modloader needs to be installed.", nil)
+                                                                    preferredStyle:UIAlertControllerStyleAlert];
+            UIAlertAction *understandAction = [UIAlertAction actionWithTitle:localize(@"I understand", nil)
+                                                                       style:UIAlertActionStyleDefault
+                                                                     handler:^(UIAlertAction * _Nonnull action) {
+                [ModloaderInstaller performModloaderInstallationForModpackDirectory:fullPath fromViewController:self];
+            }];
+            [alert addAction:understandAction];
+            [self presentViewController:alert animated:YES completion:nil];
+            return;
+        }
+    }
+    
     if (BaseAuthenticator.current == nil) {
         UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0] viewControllers][0];
         [view performSelector:@selector(selectAccount:) withObject:sender];
@@ -319,7 +319,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         self.progressText.text = progress.localizedAdditionalDescription;
         
         if (!progress.finished) return;
-        // Updated to use the non-deprecated dismissal method.
         [self.progressVC dismissViewControllerAnimated:NO completion:nil];
         
         self.progressViewMain.observedProgress = nil;
