@@ -319,7 +319,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         self.progressText.text = progress.localizedAdditionalDescription;
         
         if (!progress.finished) return;
-        [self.progressVC dismissModalViewControllerAnimated:NO];
+        // Updated to use the non-deprecated dismissal method.
+        [self.progressVC dismissViewControllerAnimated:NO completion:nil];
         
         self.progressViewMain.observedProgress = nil;
         if (self.task.metadata) {
