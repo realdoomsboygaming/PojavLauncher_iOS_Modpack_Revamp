@@ -29,6 +29,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 @interface CurseForgeAPI ()
 @property (nonatomic, copy) NSString *apiKey;
+@property (nonatomic, strong) AFHTTPSessionManager *sessionManager;
 - (BOOL)verifyManifestFromDictionary:(NSDictionary *)manifest;
 - (void)asyncExtractManifestFromPackage:(NSString *)packagePath completion:(void (^)(NSDictionary *manifestDict, NSError *error))completion;
 - (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id result, NSError *error))completion;
@@ -51,6 +52,8 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     if (self) {
         self.apiKey = apiKey ?: @"";
         _networkQueue = dispatch_queue_create("com.curseforge.api.network", DISPATCH_QUEUE_SERIAL);
+        // Initialize and cache the session manager to avoid recreating it each time.
+        self.sessionManager = [AFHTTPSessionManager manager];
         NSLog(@"CurseForgeAPI: Initialized with API key: %@", apiKey.length > 0 ? @"[redacted]" : @"(none)");
     }
     return self;
@@ -60,7 +63,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 - (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id, NSError *))completion {
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
-    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     NSString *key = self.apiKey;
     if (key.length == 0) {
         char *envKey = getenv("CURSEFORGE_API_KEY");
@@ -71,10 +73,10 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
             NSLog(@"getEndpoint: No API key provided or found in environment");
         }
     }
-    [manager.requestSerializer setValue:key forHTTPHeaderField:@"x-api-key"];
+    [self.sessionManager.requestSerializer setValue:key forHTTPHeaderField:@"x-api-key"];
     NSLog(@"getEndpoint: Requesting %@ with params: %@", url, params);
-    [manager GET:url parameters:params headers:nil progress:nil success:^(NSURLSessionTask *task, id responseObject) {
-        NSLog(@"getEndpoint: Success for %@: %@", endpoint, responseObject);
+    [self.sessionManager GET:url parameters:params headers:nil progress:nil success:^(NSURLSessionTask *task, id responseObject) {
+        NSLog(@"getEndpoint: Success for %@.", endpoint);
         if (completion) completion(responseObject, nil);
     } failure:^(NSURLSessionTask *operation, NSError *error) {
         self.lastError = error;
@@ -87,45 +89,30 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 - (void)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID completion:(void (^)(NSString *, NSError *))completion {
     NSString *endpoint = [NSString stringWithFormat:@"mods/%llu/files/%llu/download-url", projectID, fileID];
-    __block int attempt = 0;
+    [self getDownloadUrlForProject:projectID fileID:fileID attempt:0 endpoint:endpoint completion:completion];
+}
+
+- (void)getDownloadUrlForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID attempt:(int)attempt endpoint:(NSString *)endpoint completion:(void (^)(NSString *, NSError *))completion {
     __weak typeof(self) weakSelf = self;
-    __block void (^attemptBlock)(void) = nil;
-    __weak void (^weakAttemptBlock)(void) = nil;
-    attemptBlock = [^{
+    [self getEndpoint:endpoint params:nil completion:^(id response, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
-            NSLog(@"getDownloadUrlForProject: Self deallocated during request for project %llu, file %llu", projectID, fileID);
-            if (completion) {
-                NSError *err = [NSError errorWithDomain:@"CurseForgeAPIErrorDomain" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"Internal error (self was deallocated)."}];
-                completion(nil, err);
-            }
-            return;
-        }
-        [strongSelf getEndpoint:endpoint params:nil completion:^(id response, NSError *error) {
-            if (error) {
-                NSLog(@"getDownloadUrlForProject: Attempt %d failed for project %llu, file %llu: %@", attempt, projectID, fileID, error);
-            }
-            if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
-                NSString *urlString = [NSString stringWithFormat:@"%@", response[@"data"]];
-                NSLog(@"getDownloadUrlForProject: Got URL for project %llu, file %llu: %@", projectID, fileID, urlString);
-                if (completion) completion(urlString, nil);
+        if (!strongSelf) return;
+        if (response && response[@"data"] && ![response[@"data"] isKindOfClass:[NSNull class]]) {
+            NSString *urlString = [NSString stringWithFormat:@"%@", response[@"data"]];
+            NSLog(@"getDownloadUrlForProject: Got URL for project %llu, file %llu: %@", projectID, fileID, urlString);
+            if (completion) completion(urlString, nil);
+        } else {
+            if (attempt < 1) {
+                NSLog(@"getDownloadUrlForProject: Retrying (attempt %d) for project %llu, file %llu", attempt+1, projectID, fileID);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), _networkQueue, ^{
+                    [strongSelf getDownloadUrlForProject:projectID fileID:fileID attempt:attempt+1 endpoint:endpoint completion:completion];
+                });
             } else {
-                attempt++;
-                if (attempt < 2) {
-                    NSLog(@"getDownloadUrlForProject: Retrying (attempt %d) for project %llu, file %llu", attempt, projectID, fileID);
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), strongSelf->_networkQueue, ^{
-                        __strong typeof(weakAttemptBlock) innerBlock = weakAttemptBlock;
-                        if (innerBlock) innerBlock();
-                    });
-                } else {
-                    NSLog(@"getDownloadUrlForProject: Falling back after %d attempts for project %llu, file %llu", attempt, projectID, fileID);
-                    [strongSelf handleDownloadUrlFallbackForProject:projectID fileID:fileID completion:completion];
-                }
+                NSLog(@"getDownloadUrlForProject: Falling back after %d attempts for project %llu, file %llu", attempt+1, projectID, fileID);
+                [strongSelf handleDownloadUrlFallbackForProject:projectID fileID:fileID completion:completion];
             }
-        }];
-    } copy];
-    weakAttemptBlock = attemptBlock;
-    attemptBlock();
+        }
+    }];
 }
 
 - (void)handleDownloadUrlFallbackForProject:(unsigned long long)projectID fileID:(unsigned long long)fileID completion:(void (^)(NSString *, NSError *))completion {
@@ -136,9 +123,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSString *endpoint2 = [NSString stringWithFormat:@"mods/%llu/files/%llu", projectID, fileID];
     NSLog(@"handleDownloadUrlFallback: Attempting fallback for project %llu, file %llu", projectID, fileID);
     [self getEndpoint:endpoint2 params:nil completion:^(id fallbackResponse, NSError *error2) {
-        if (error2) {
-            NSLog(@"handleDownloadUrlFallback: Fallback endpoint failed: %@", error2);
-        }
         if ([fallbackResponse isKindOfClass:[NSDictionary class]]) {
             NSDictionary *respDict = (NSDictionary *)fallbackResponse;
             id dataObj = respDict[@"data"];
@@ -152,7 +136,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                     if (fileName.length > 0) {
                         unsigned long long idValue = [idNumber unsignedLongLongValue];
                         NSString *mediaLink = [NSString stringWithFormat:@"https://media.forgecdn.net/files/%llu/%llu/%@", idValue/1000, idValue%1000, fileName];
-                        NSLog(@"handleDownloadUrlFallback: Generated media link for project %llu, file %llu: %@", projectID, fileID, mediaLink);
+                        NSLog(@"handleDownloadUrlFallback: Generated media link for project %llu, file %llu", projectID, fileID);
                         if (completion) completion(mediaLink, nil);
                         return;
                     } else {
@@ -399,7 +383,7 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                     });
                     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:manifestDict[@"dependencies"]];
                     if (depInfo[@"json"]) {
-                        NSString *jsonPath = [NSString stringWithFormat:@"%1$@/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
+                        NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")], depInfo[@"id"]];
                         NSURLSessionDownloadTask *depTask = [downloader createDownloadTask:depInfo[@"json"] size:1 sha:nil altName:nil toPath:jsonPath];
                         if (depTask) {
                             dispatch_async(dispatch_get_main_queue(), ^{
