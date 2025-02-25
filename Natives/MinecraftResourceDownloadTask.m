@@ -1,5 +1,5 @@
-#include <CommonCrypto/CommonDigest.h>
-
+#import <UIKit/UIKit.h>
+#import <CommonCrypto/CommonDigest.h>
 #import "authenticator/BaseAuthenticator.h"
 #import "installer/modpack/ModpackAPI.h"
 #import "AFNetworking.h"
@@ -17,10 +17,10 @@
 
 @implementation MinecraftResourceDownloadTask
 
+// Initializer sets up session configuration and download arrays.
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Use default configuration
         NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
         configuration.timeoutIntervalForRequest = 86400;
         self.manager = [[AFURLSessionManager alloc] initWithSessionConfiguration:configuration];
@@ -31,7 +31,7 @@
     return self;
 }
 
-// Our main createDownloadTask: method with a success callback
+// Main method to create a download task with a success callback.
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url
                                            size:(NSUInteger)size
                                             sha:(NSString *)sha
@@ -51,15 +51,16 @@
     NSString *name = altName ?: path.lastPathComponent;
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]];
     
-    // Increase active downloads counter
+    // Increase active downloads counter.
     self.activeDownloads++;
     
     __block NSProgress *childProgress = nil;
+    __weak typeof(self) weakSelf = self;
     NSURLSessionDownloadTask *task = [self.manager downloadTaskWithRequest:request
         progress:nil
         destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
             NSLog(@"[MCDL] Downloading %@", name);
-            // Ensure the destination directory exists
+            // Ensure the destination directory exists.
             [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
                                     withIntermediateDirectories:YES
                                                      attributes:nil error:nil];
@@ -68,26 +69,29 @@
         }
         completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error)
         {
-            // Decrease active downloads counter when task finishes
-            self.activeDownloads--;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            
+            // Decrease active downloads counter when task finishes.
+            strongSelf.activeDownloads--;
             
             // If only one file remains active, trigger finalization.
-            if (self.activeDownloads == 1) {
+            if (strongSelf.activeDownloads == 1) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     NSLog(@"[MCDL] Only one file remaining, proceeding to finalization.");
-                    [self finalizeDownloads];
+                    [strongSelf finalizeDownloads];
                 });
             }
             
-            if (self.progress.cancelled) {
+            if (strongSelf.progress.cancelled) {
                 // If cancelled, ignore errors.
             } else if (error != nil) {
-                [self finishDownloadWithError:error file:name];
-            } else if (![self checkSHA:sha forFile:path altName:altName]) {
-                [self finishDownloadWithErrorString:[NSString stringWithFormat:
+                [strongSelf finishDownloadWithError:error file:name];
+            } else if (![strongSelf checkSHA:sha forFile:path altName:altName]) {
+                [strongSelf finishDownloadWithErrorString:[NSString stringWithFormat:
                     @"Failed to verify file %@: SHA1 mismatch", path.lastPathComponent]];
             } else {
-                // Mark childProgress as "finished" by forcibly setting completed to total:
+                // Mark childProgress as "finished" by forcibly setting completed to total.
                 if (childProgress) {
                     [childProgress willChangeValueForKey:@"fractionCompleted"];
                     childProgress.completedUnitCount = childProgress.totalUnitCount;
@@ -98,10 +102,10 @@
         }
     ];
     
-    // If a valid task was created, add it to our overall progress and file list.
+    // If a valid task was created, add it to overall progress and file list.
     if (task) {
         childProgress = [self.manager downloadProgressForTask:task];
-        // Set the progress total to the actual file size (in bytes)
+        // Set the progress total to the actual file size (in bytes).
         childProgress.totalUnitCount = size;
         [self addChildProgress:childProgress];
         
@@ -127,7 +131,7 @@
             }
         }
         
-        // Keep the childProgress in progressList for the UI
+        // Keep the childProgress in progressList for the UI.
         @synchronized(self.progressList) {
             [self.progressList addObject:childProgress];
         }
@@ -136,7 +140,7 @@
     return task;
 }
 
-// Convenience method without the 'success' callback
+// Convenience method without the 'success' callback.
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url
                                            size:(NSUInteger)size
                                             sha:(NSString *)sha
@@ -154,7 +158,7 @@
     self.textProgress.totalUnitCount = self.progress.totalUnitCount;
 }
 
-// Download version metadata
+// Download version metadata.
 - (void)downloadVersionMetadata:(NSDictionary *)version success:(void(^)(void))success {
     NSString *versionStr = version[@"id"];
     if ([versionStr isEqualToString:@"latest-release"]) {
@@ -167,22 +171,25 @@
                       getenv("POJAV_GAME_DIR"), versionStr];
     version = (id)[MinecraftResourceUtils findVersion:versionStr inList:remoteVersionList];
     
+    __weak typeof(self) weakSelf = self;
     void(^completionBlock)(void) = ^ {
-        self.metadata = parseJSONFromFile(path);
-        if (self.metadata[@"NSErrorObject"]) {
-            [self finishDownloadWithErrorString:[self.metadata[@"NSErrorObject"] localizedDescription]];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.metadata = parseJSONFromFile(path);
+        if (strongSelf.metadata[@"NSErrorObject"]) {
+            [strongSelf finishDownloadWithErrorString:[strongSelf.metadata[@"NSErrorObject"] localizedDescription]];
             return;
         }
-        if (self.metadata[@"inheritsFrom"]) {
+        if (strongSelf.metadata[@"inheritsFrom"]) {
             NSMutableDictionary *inheritsFromDict = parseJSONFromFile([NSString stringWithFormat:
                 @"%1$s/versions/%2$@/%2$@.json",
-                getenv("POJAV_GAME_DIR"), self.metadata[@"inheritsFrom"]]);
+                getenv("POJAV_GAME_DIR"), strongSelf.metadata[@"inheritsFrom"]]);
             if (inheritsFromDict) {
-                [MinecraftResourceUtils processVersion:self.metadata inheritsFrom:inheritsFromDict];
-                self.metadata = inheritsFromDict;
+                [MinecraftResourceUtils processVersion:strongSelf.metadata inheritsFrom:inheritsFromDict];
+                strongSelf.metadata = inheritsFromDict;
             }
         }
-        [MinecraftResourceUtils tweakVersionJson:self.metadata];
+        [MinecraftResourceUtils tweakVersionJson:strongSelf.metadata];
         success();
     };
     
@@ -215,7 +222,7 @@
     [task resume];
 }
 
-// Download the asset index if needed
+// Download the asset index if needed.
 - (void)downloadAssetMetadataWithSuccess:(void(^)(void))success {
     NSDictionary *assetIndex = self.metadata[@"assetIndex"];
     if (!assetIndex) {
@@ -234,7 +241,7 @@
     [task resume];
 }
 
-// Download version libraries
+// Download version libraries.
 - (NSArray *)downloadClientLibraries {
     NSMutableArray *tasks = [NSMutableArray new];
     for (NSDictionary *library in self.metadata[@"libraries"]) {
@@ -277,7 +284,7 @@
     return tasks;
 }
 
-// Download assets
+// Download assets.
 - (NSArray *)downloadClientAssets {
     NSMutableArray *tasks = [NSMutableArray new];
     NSDictionary *assets = self.metadata[@"assetIndexObj"];
@@ -315,7 +322,7 @@
     return tasks;
 }
 
-// High-level method to download the entire version
+// High-level method to download the entire version.
 - (void)downloadVersion:(NSDictionary *)version {
     [self prepareForDownload];
     [self downloadVersionMetadata:version success:^{
@@ -337,7 +344,7 @@
     }];
 }
 
-// For modpacks from an API
+// For modpacks from an API.
 - (void)downloadModpackFromAPI:(ModpackAPI *)api
                          detail:(NSDictionary *)modDetail
                         atIndex:(NSUInteger)selectedVersion
@@ -352,16 +359,19 @@
                        stringByReplacingOccurrencesOfString:@" " withString:@"_"] copy];
     NSString *packagePath = [NSTemporaryDirectory() stringByAppendingFormat:@"/%@.zip", name];
     
+    __weak typeof(self) weakSelf = self;
     NSURLSessionDownloadTask *task =
         [self createDownloadTask:url size:size sha:sha altName:nil toPath:packagePath success:^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
             NSString *destinationPath =
                 [NSString stringWithFormat:@"%s/custom_gamedir/%@", getenv("POJAV_GAME_DIR"), name];
-            [api downloader:self submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
+            [api downloader:strongSelf submitDownloadTasksFromPackage:packagePath toPath:destinationPath];
         }];
     [task resume];
 }
 
-// Prepare our data for a new set of downloads
+// Prepare data for a new set of downloads.
 - (void)prepareForDownload {
     self.textProgress = [NSProgress new];
     self.textProgress.kind = NSProgressKindFile;
@@ -369,12 +379,12 @@
     self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 0; // No fake unit; total is built dynamically
+    self.progress.totalUnitCount = 0; // Total is built dynamically.
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
 
-// *** New public method implementation ***
+// New public method implementation to finalize downloads.
 - (void)finalizeDownloads {
     self.progress.completedUnitCount = self.progress.totalUnitCount;
     self.textProgress.completedUnitCount = self.progress.totalUnitCount;
