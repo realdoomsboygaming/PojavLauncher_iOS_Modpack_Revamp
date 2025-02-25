@@ -74,6 +74,20 @@
     item[@"versionDetailsLoaded"] = @(YES);
 }
 
+#pragma mark - New: Install Modpack from Detail
+// This method was missing, causing mod download tasks not to be reported.
+// It posts the "InstallModpack" notification, similar to CurseForgeAPI.
+- (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion {
+    NSArray *versionNames = modDetail[@"versionNames"];
+    if (selectedVersion >= versionNames.count) {
+        NSLog(@"installModpackFromDetail: Invalid version index %lu (max %lu)", (unsigned long)selectedVersion, (unsigned long)versionNames.count);
+        return;
+    }
+    NSLog(@"installModpackFromDetail: Installing modpack %@ at version index %lu", modDetail[@"title"], (unsigned long)selectedVersion);
+    NSDictionary *userInfo = @{@"detail": modDetail, @"index": @(selectedVersion)};
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack" object:self userInfo:userInfo];
+}
+
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     NSError *error = nil;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&error];
@@ -123,7 +137,8 @@
     
     NSDictionary<NSString *, NSString *> *depInfo = [ModpackUtils infoForDependencies:indexDict[@"dependencies"]];
     if (depInfo[@"json"]) {
-        NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json", getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
+        NSString *jsonPath = [NSString stringWithFormat:@"%1$s/versions/%2$@/%2$@.json",
+                              getenv("POJAV_GAME_DIR"), depInfo[@"id"]];
         NSURLSessionDownloadTask *task = [downloader createDownloadTask:depInfo[@"json"] size:0 sha:nil altName:nil toPath:jsonPath];
         [task resume];
     }
