@@ -1,6 +1,8 @@
+#import <UIKit/UIKit.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
 #import "DownloadProgressViewController.h"
+#import "MinecraftResourceDownloadTask.h"
 
 // Associated object keys.
 static const void *kProgressKey = &kProgressKey;
@@ -14,6 +16,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
 
 @implementation DownloadProgressViewController
 
+// Initializer with task.
 - (instancetype)initWithTask:(MinecraftResourceDownloadTask *)task {
     self = [super init];
     if (self) {
@@ -29,17 +32,20 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.tableView.allowsSelection = NO;
 }
 
+// Use block-based NSTimer for clarity and to avoid potential retain cycles.
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self.task.textProgress addObserver:self
                              forKeyPath:@"fractionCompleted"
                                 options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                                 context:TotalProgressObserverContext];
-    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
-                                                         target:self
-                                                       selector:@selector(updateVisibleCells)
-                                                       userInfo:nil
-                                                        repeats:YES];
+    __weak typeof(self) weakSelf = self;
+    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer * _Nonnull timer) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf) {
+            [strongSelf updateVisibleCells];
+        }
+    }];
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -51,21 +57,29 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     self.refreshTimer = nil;
 }
 
+// Helper method to update a cell's UI based on its NSProgress.
+- (void)updateCell:(UITableViewCell *)cell withProgress:(NSProgress *)progress {
+    if (progress.finished) {
+        cell.detailTextLabel.text = @"Done";
+        cell.accessoryType = UITableViewCellAccessoryCheckmark;
+    } else {
+        double completed = progress.completedUnitCount;
+        double total = progress.totalUnitCount;
+        NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
+        cell.detailTextLabel.text = formatted;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    }
+}
+
+// Refreshes the visible cells in the table view.
 - (void)updateVisibleCells {
     NSArray *visibleCells = [self.tableView visibleCells];
     BOOL allFinished = YES;
     for (UITableViewCell *cell in visibleCells) {
         NSProgress *progress = objc_getAssociatedObject(cell, kProgressKey);
         if (progress) {
-            if (progress.finished) {
-                cell.detailTextLabel.text = @"Done";
-                cell.accessoryType = UITableViewCellAccessoryCheckmark;
-            } else {
-                double completed = progress.completedUnitCount;
-                double total = progress.totalUnitCount;
-                NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
-                cell.detailTextLabel.text = formatted;
-                cell.accessoryType = UITableViewCellAccessoryNone;
+            [self updateCell:cell withProgress:progress];
+            if (!progress.finished) {
                 allFinished = NO;
             }
         }
@@ -78,6 +92,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
     }
 }
 
+// Closes the view controller.
 - (void)actionClose {
     [self.navigationController dismissViewControllerAnimated:YES completion:nil];
 }
@@ -89,16 +104,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
         UITableViewCell *cell = objc_getAssociatedObject(progress, kCellKey);
         if (!cell) return;
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (progress.finished) {
-                cell.detailTextLabel.text = @"Done";
-                cell.accessoryType = UITableViewCellAccessoryCheckmark;
-            } else {
-                double completed = progress.completedUnitCount;
-                double total = progress.totalUnitCount;
-                NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
-                cell.detailTextLabel.text = formatted;
-                cell.accessoryType = UITableViewCellAccessoryNone;
-            }
+            [self updateCell:cell withProgress:progress];
         });
     } else if (context == TotalProgressObserverContext) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -157,16 +163,7 @@ static void *TotalProgressObserverContext = &TotalProgressObserverContext;
                 options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
                 context:CellProgressObserverContext];
     
-    if (progress.finished) {
-        cell.detailTextLabel.text = @"Done";
-        cell.accessoryType = UITableViewCellAccessoryCheckmark;
-    } else {
-        double completed = progress.completedUnitCount;
-        double total = progress.totalUnitCount;
-        NSString *formatted = [NSString stringWithFormat:@"%.2f MB / %.2f MB", completed / 1048576.0, total / 1048576.0];
-        cell.detailTextLabel.text = formatted;
-        cell.accessoryType = UITableViewCellAccessoryNone;
-    }
+    [self updateCell:cell withProgress:progress];
     
     return cell;
 }
