@@ -36,6 +36,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
+@property(nonatomic, strong) UIButton *buttonInstall; // Assumed to be declared in the header
+@property(nonatomic, strong) UIProgressView *progressViewMain;
+@property(nonatomic, strong) UILabel *progressText;
 
 // New property for modloader install logic
 @property(nonatomic, assign) BOOL modloaderInstallPending;
@@ -43,6 +46,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 #pragma mark - Modloader Installation
 - (void)updateModloaderInstallStatus;
 - (void)checkAndInstallModloaderIfNeeded;
+
+#pragma mark - JIT Handling
+- (void)invokeAfterJITEnabled:(void(^)(void))handler;
 
 @end
 
@@ -129,6 +135,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
     }
     
+    // Initialize version text field
     self.versionTextField = [[PickTextField alloc] initWithFrame:CGRectMake(4, 4, self.toolbar.frame.size.width * 0.8 - 8, self.toolbar.frame.size.height - 8)];
     [self.versionTextField addTarget:self.versionTextField action:@selector(resignFirstResponder) forControlEvents:UIControlEventEditingDidEndOnExit];
     self.versionTextField.autoresizingMask = AUTORESIZE_MASKS;
@@ -140,6 +147,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.versionTextField.rightViewMode = UITextFieldViewModeAlways;
     self.versionTextField.textAlignment = NSTextAlignmentCenter;
     
+    // Initialize version picker
     self.versionPickerView = [[PLPickerView alloc] init];
     self.versionPickerView.delegate = self;
     self.versionPickerView.dataSource = self;
@@ -156,6 +164,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     UIView *targetToolbar = self.toolbar;
     [targetToolbar addSubview:self.versionTextField];
     
+    // Initialize progress view
     self.progressViewMain = [[UIProgressView alloc] initWithFrame:CGRectMake(0, 0, self.toolbar.frame.size.width, 4)];
     self.progressViewMain.autoresizingMask = AUTORESIZE_MASKS;
     self.progressViewMain.hidden = YES;
@@ -163,17 +172,16 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     
     // Initialize the play/install button (buttonInstall)
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
-    // Configure the play/install button (buttonInstall)
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
-    self.buttonInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.82, 4, self.toolbar.frame.size.width * 0.16, self.toolbar.frame.size.height - 8);
+    // The frame will be adjusted in viewDidLayoutSubviews
     self.buttonInstall.tintColor = UIColor.whiteColor;
     self.buttonInstall.enabled = NO;
     [self.buttonInstall addTarget:self action:@selector(performInstallOrShowDetails:) forControlEvents:UIControlEventPrimaryActionTriggered];
-    // Add the button to the toolbar so that it appears.
     [targetToolbar addSubview:self.buttonInstall];
     
+    // Initialize progress text label
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
     self.progressText.adjustsFontSizeToFitWidth = YES;
     self.progressText.autoresizingMask = AUTORESIZE_MASKS;
@@ -203,6 +211,19 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [super viewDidAppear:animated];
     [self reloadProfileList];
     [self updateModloaderInstallStatus];
+}
+
+#pragma mark - Layout Updates
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    // Update frames based on the current toolbar size.
+    self.versionTextField.frame = CGRectMake(4, 4, self.toolbar.frame.size.width * 0.8 - 8, self.toolbar.frame.size.height - 8);
+    self.progressViewMain.frame = CGRectMake(0, 0, self.toolbar.frame.size.width, 4);
+    // Adjust the button frame to ensure it's visible.
+    // You can tweak these multipliers if needed.
+    self.buttonInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.8, 4, self.toolbar.frame.size.width * 0.2, self.toolbar.frame.size.height - 8);
+    [sidebarViewController updateAccountInfo];
 }
 
 #pragma mark - Play/Install Button Action
@@ -242,7 +263,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         return;
     }
     
-    [self setInteractionEnabled:YES forDownloading:YES]; // Disable interactions while launching
+    [self setInteractionEnabled:YES forDownloading:YES];
     
     NSString *versionId = PLProfiles.current.profiles[self.versionTextField.text][@"lastVersionId"];
     NSDictionary *object = [[remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(id == %@)", versionId]] firstObject];
@@ -500,11 +521,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (BOOL)prefersHomeIndicatorAutoHidden {
     return YES;
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    [sidebarViewController updateAccountInfo];
 }
 
 @end
