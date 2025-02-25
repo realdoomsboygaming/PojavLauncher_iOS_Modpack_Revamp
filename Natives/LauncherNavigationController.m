@@ -34,6 +34,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
+@property(nonatomic, strong) UIButton *buttonModloaderInstall; // New: Install Modloader button
 @end
 
 @implementation LauncherNavigationController
@@ -77,17 +78,29 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
     
+    // Existing "Play" button.
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     setButtonPointerInteraction(self.buttonInstall);
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.autoresizingMask = AUTORESIZE_MASKS;
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
-    self.buttonInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.8, 4, self.toolbar.frame.size.width * 0.2, self.toolbar.frame.size.height - 8);
+    self.buttonInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.82, 4, self.toolbar.frame.size.width * 0.16, self.toolbar.frame.size.height - 8);
     self.buttonInstall.tintColor = UIColor.whiteColor;
     self.buttonInstall.enabled = NO;
     [self.buttonInstall addTarget:self action:@selector(performInstallOrShowDetails:) forControlEvents:UIControlEventPrimaryActionTriggered];
     [targetToolbar addSubview:self.buttonInstall];
+    
+    // New "Install Modloader" button.
+    self.buttonModloaderInstall = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.buttonModloaderInstall setTitle:@"Install" forState:UIControlStateNormal];
+    self.buttonModloaderInstall.autoresizingMask = AUTORESIZE_MASKS;
+    self.buttonModloaderInstall.backgroundColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0];
+    self.buttonModloaderInstall.layer.cornerRadius = 5;
+    // Position this button to the left of the Play button.
+    self.buttonModloaderInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.64, 4, self.toolbar.frame.size.width * 0.16, self.toolbar.frame.size.height - 8);
+    [self.buttonModloaderInstall addTarget:self action:@selector(installModloaderAction) forControlEvents:UIControlEventPrimaryActionTriggered];
+    [targetToolbar addSubview:self.buttonModloaderInstall];
     
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
     self.progressText.adjustsFontSizeToFitWidth = YES;
@@ -114,19 +127,22 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 }
 
-#pragma mark - New: Automatic Forge Installation (for CurseForge)
+#pragma mark - New: Install Modloader Action
+- (void)installModloaderAction {
+    [self checkAndInstallModloaderIfNeeded];
+}
+
+#pragma mark - New: Automatic Modloader Installation
 - (void)autoInstallForgeWithVanillaVersion:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer {
     NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (!apiKey) {
         NSLog(@"No CurseForge API key available for automatic Forge installation.");
         return;
     }
-    // Create a temporary CurseForgeAPI instance and call autoInstallForge.
     CurseForgeAPI *cfAPI = [[CurseForgeAPI alloc] initWithAPIKey:apiKey];
     [cfAPI autoInstallForge:vanillaVer loaderVersion:forgeVer];
 }
 
-#pragma mark - New: Check and Install Modloader
 - (void)checkAndInstallModloaderIfNeeded {
     NSDictionary *profile = PLProfiles.current.profiles[PLProfiles.current.selectedProfileName];
     if (!profile) return;
@@ -143,7 +159,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
         NSString *loaderType = installerInfo[@"loaderType"];
         if ([loaderType isEqualToString:@"forge"]) {
-            // Automatically install Forge without user input.
+            // For Forge, automatically trigger installation without further UI.
             NSString *versionString = installerInfo[@"versionString"];
             NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
             if (components.count == 2) {
@@ -154,7 +170,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                 NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
             }
         } else if ([loaderType isEqualToString:@"fabric"]) {
-            // Present Fabric installer interface.
+            // For Fabric, present the installer UI.
             FabricInstallViewController *vc = [FabricInstallViewController new];
             [self presentViewController:vc animated:YES completion:nil];
         }
