@@ -36,15 +36,16 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
-@property(nonatomic) UIButton *buttonInstall; // Assumed to be declared somewhere
+@property(nonatomic) UIButton *buttonInstall; // the Play/Install button
+
 // New properties/methods
 @property(nonatomic, assign) BOOL modloaderInstallPending;  // YES if a modloader installer file exists
-- (void)invokeAfterJITEnabled:(void(^)(void))handler; // Added declaration so the selector is known
+- (void)invokeAfterJITEnabled:(void(^)(void))handler; // New declaration
 @end
 
 @implementation LauncherNavigationController
 
-#pragma mark - Modloader Install Status
+#pragma mark - Modloader Installation
 
 - (void)updateModloaderInstallStatus {
     NSDictionary *profile = PLProfiles.current.profiles[PLProfiles.current.selectedProfileName];
@@ -73,6 +74,46 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     } else {
          self.modloaderInstallPending = NO;
          [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
+    }
+}
+
+- (void)checkAndInstallModloaderIfNeeded {
+    NSDictionary *profile = PLProfiles.current.profiles[PLProfiles.current.selectedProfileName];
+    if (!profile) return;
+    NSString *gameDir = profile[@"gameDir"];
+    if (!gameDir.length) return;
+    NSString *modpackPath = [[NSFileManager defaultManager] currentDirectoryPath];
+    if ([gameDir hasPrefix:@"./"]) {
+        gameDir = [gameDir substringFromIndex:2];
+    }
+    NSString *fullPath = [modpackPath stringByAppendingPathComponent:gameDir];
+    NSError *error = nil;
+    NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:fullPath error:&error];
+    if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
+        NSString *loaderType = installerInfo[@"loaderType"];
+        if ([loaderType isEqualToString:@"forge"]) {
+            NSString *versionString = installerInfo[@"versionString"];
+            NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
+            if (components.count == 2) {
+                NSString *vanillaVer = components[0];
+                NSString *forgeVer = components[1];
+                NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
+                if (apiKey) {
+                    CurseForgeAPI *cfAPI = [[CurseForgeAPI alloc] initWithAPIKey:apiKey];
+                    [cfAPI autoInstallForge:vanillaVer loaderVersion:forgeVer];
+                } else {
+                    NSLog(@"No CurseForge API key available for automatic Forge installation.");
+                }
+            } else {
+                NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
+            }
+        } else if ([loaderType isEqualToString:@"fabric"]) {
+            FabricInstallViewController *vc = [FabricInstallViewController new];
+            [self presentViewController:vc animated:YES completion:nil];
+        }
+        // Remove installer file after processing.
+        NSString *installerPath = [fullPath stringByAppendingPathComponent:@"modloader_installer.json"];
+        [[NSFileManager defaultManager] removeItemAtPath:installerPath error:nil];
     }
 }
 
@@ -117,7 +158,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
     
-    // Use the existing play button.
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     setButtonPointerInteraction(self.buttonInstall);
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
@@ -184,158 +224,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 }
 
-#pragma mark - Automatic Modloader Installation
-
-- (void)autoInstallForgeWithVanillaVersion:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer {
-    NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
-    if (!apiKey) {
-        NSLog(@"No CurseForge API key available for automatic Forge installation.");
-        return;
-    }
-    CurseForgeAPI *cfAPI = [[CurseForgeAPI alloc] initWithAPIKey:apiKey];
-    [cfAPI autoInstallForge:vanillaVer loaderVersion:forgeVer];
-}
-
-- (void)checkAndInstallModloaderIfNeeded {
-    NSDictionary *profile = PLProfiles.current.profiles[PLProfiles.current.selectedProfileName];
-    if (!profile) return;
-    NSString *gameDir = profile[@"gameDir"];
-    if (!gameDir.length) return;
-    NSString *modpackPath = [[NSFileManager defaultManager] currentDirectoryPath];
-    if ([gameDir hasPrefix:@"./"]) {
-        gameDir = [gameDir substringFromIndex:2];
-    }
-    NSString *fullPath = [modpackPath stringByAppendingPathComponent:gameDir];
-    NSError *error = nil;
-    NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:fullPath error:&error];
-    if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
-        NSString *loaderType = installerInfo[@"loaderType"];
-        if ([loaderType isEqualToString:@"forge"]) {
-            NSString *versionString = installerInfo[@"versionString"];
-            NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
-            if (components.count == 2) {
-                NSString *vanillaVer = components[0];
-                NSString *forgeVer = components[1];
-                [self autoInstallForgeWithVanillaVersion:vanillaVer loaderVersion:forgeVer];
-            } else {
-                NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
-            }
-        } else if ([loaderType isEqualToString:@"fabric"]) {
-            FabricInstallViewController *vc = [FabricInstallViewController new];
-            [self presentViewController:vc animated:YES completion:nil];
-        }
-        // Remove installer file after processing.
-        NSString *installerPath = [fullPath stringByAppendingPathComponent:@"modloader_installer.json"];
-        [[NSFileManager defaultManager] removeItemAtPath:installerPath error:nil];
-    }
-}
-
-#pragma mark - Profile & Version Management
-
-- (void)reloadProfileList {
-    [self fetchLocalVersionList];
-    [PLProfiles updateCurrent];
-    [self.versionPickerView reloadAllComponents];
-    self.profileSelectedAt = [PLProfiles.current.profiles.allKeys indexOfObject:PLProfiles.current.selectedProfileName];
-    if (self.profileSelectedAt == -1) return;
-    [self.versionPickerView selectRow:self.profileSelectedAt inComponent:0 animated:NO];
-    [self pickerView:self.versionPickerView didSelectRow:self.profileSelectedAt inComponent:0];
-}
-
-- (void)fetchLocalVersionList {
-    if (!localVersionList) {
-        localVersionList = [NSMutableArray new];
-    }
-    [localVersionList removeAllObjects];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *versionPath = [NSString stringWithFormat:@"%s/versions/", getenv("POJAV_GAME_DIR")];
-    NSArray *list = [fileManager contentsOfDirectoryAtPath:versionPath error:nil];
-    for (NSString *versionId in list) {
-        NSString *localPath = [NSString stringWithFormat:@"%s/versions/%@", getenv("POJAV_GAME_DIR"), versionId];
-        BOOL isDirectory;
-        if ([fileManager fileExistsAtPath:localPath isDirectory:&isDirectory] && isDirectory) {
-            [localVersionList addObject:@{@"id": versionId, @"type": @"custom"}];
-        }
-    }
-}
-
-- (void)fetchRemoteVersionList {
-    self.buttonInstall.enabled = NO;
-    remoteVersionList = [@[
-        @{@"id": @"latest-release", @"type": @"release"},
-        @{@"id": @"latest-snapshot", @"type": @"snapshot"}
-    ] mutableCopy];
-    
-    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    [manager GET:@"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" parameters:nil headers:nil progress:^(NSProgress * _Nonnull progress) {
-        self.progressViewMain.progress = progress.fractionCompleted;
-    } success:^(NSURLSessionTask *task, NSDictionary *responseObject) {
-        [remoteVersionList addObjectsFromArray:responseObject[@"versions"]];
-        NSDebugLog(@"[VersionList] Got %lu versions", (unsigned long)remoteVersionList.count);
-        setPrefObject(@"internal.latest_version", responseObject[@"latest"]);
-        self.buttonInstall.enabled = YES;
-    } failure:^(NSURLSessionTask *operation, NSError *error) {
-        NSDebugLog(@"[VersionList] Warning: Unable to fetch version list: %@", error.localizedDescription);
-        self.buttonInstall.enabled = YES;
-    }];
-}
-
-#pragma mark - Options
-
-- (void)enterCustomControls {
-    CustomControlsViewController *vc = [[CustomControlsViewController alloc] init];
-    vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    vc.setDefaultCtrl = ^(NSString *name) {
-        setPrefObject(@"control.default_ctrl", name);
-    };
-    vc.getDefaultCtrl = ^{
-        return getPrefObject(@"control.default_ctrl");
-    };
-    [self presentViewController:vc animated:YES completion:nil];
-}
-
-- (void)enterModInstaller {
-    UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc]
-                                                        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
-                                                        asCopy:YES];
-    documentPicker.delegate = self;
-    documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self presentViewController:documentPicker animated:YES completion:nil];
-}
-
-- (void)enterModInstallerWithPath:(NSString *)path hitEnterAfterWindowShown:(BOOL)hitEnter {
-    JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
-    vc.filepath = path;
-    vc.hitEnterAfterWindowShown = hitEnter;
-    if (!vc.requiredJavaVersion) return;
-    [self invokeAfterJITEnabled:^{
-        vc.modalPresentationStyle = UIModalPresentationFullScreen;
-        NSLog(@"[ModInstaller] launching %@", vc.filepath);
-        [self presentViewController:vc animated:YES completion:nil];
-    }];
-}
-
-- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
-    [self enterModInstallerWithPath:url.path hitEnterAfterWindowShown:NO];
-}
-
-- (void)setInteractionEnabled:(BOOL)enabled forDownloading:(BOOL)downloading {
-    for (UIControl *view in self.toolbar.subviews) {
-        if ([view isKindOfClass:UIControl.class]) {
-            view.alpha = enabled ? 1 : 0.2;
-            view.enabled = enabled;
-        }
-    }
-    self.progressViewMain.hidden = enabled;
-    self.progressText.text = nil;
-    if (downloading) {
-        [self.buttonInstall setTitle:localize(enabled ? @"Play" : @"Details", nil) forState:UIControlStateNormal];
-        self.buttonInstall.alpha = 1;
-        self.buttonInstall.enabled = YES;
-    }
-    UIApplication.sharedApplication.idleTimerDisabled = !enabled;
-}
+#pragma mark - Launch Minecraft
 
 - (void)launchMinecraft:(UIButton *)sender {
     if (!self.versionTextField.hasText) {
@@ -387,7 +276,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
     
     static CGFloat lastMsTime;
-    static NSUInteger lastSecTime, lastCompletedUnitCount;  // Corrected type
+    static NSUInteger lastSecTime, lastCompletedUnitCount;
     NSProgress *progress = self.task.textProgress;
     struct timeval tv;
     gettimeofday(&tv, NULL);
