@@ -17,7 +17,8 @@
 
 @implementation MinecraftResourceDownloadTask
 
-// Initializer sets up session configuration and download arrays.
+#pragma mark - Initialization
+
 - (instancetype)init {
     self = [super init];
     if (self) {
@@ -31,16 +32,18 @@
     return self;
 }
 
-// Main method to create a download task with a success callback.
+#pragma mark - Download Task Creation
+
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url
-                                           size:(NSUInteger)size
-                                            sha:(NSString *)sha
-                                        altName:(NSString *)altName
+                                            size:(NSUInteger)size
+                                             sha:(NSString *)sha
+                                         altName:(NSString *)altName
                                           toPath:(NSString *)path
                                         success:(void(^)(void))success
 {
-    BOOL fileExists = [NSFileManager.defaultManager fileExistsAtPath:path];
+    BOOL fileExists = [[NSFileManager defaultManager] fileExistsAtPath:path];
     if (fileExists && [self checkSHA:sha forFile:path altName:altName]) {
+        // File already exists and is verified—call success immediately.
         if (success) success();
         return nil;
     } else if (![self checkAccessWithDialog:YES]) {
@@ -61,37 +64,37 @@
         destination:^NSURL * _Nonnull(NSURL * _Nonnull targetPath, NSURLResponse * _Nonnull response) {
             NSLog(@"[MCDL] Downloading %@", name);
             // Ensure the destination directory exists.
-            [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent
-                                    withIntermediateDirectories:YES
-                                                     attributes:nil error:nil];
-            [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+            [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
+                                      withIntermediateDirectories:YES
+                                                       attributes:nil error:nil];
+            // Remove any existing file at the destination.
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             return [NSURL fileURLWithPath:path];
         }
-        completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error)
-        {
+        completionHandler:^(NSURLResponse * _Nonnull response, NSURL * _Nullable filePath, NSError * _Nullable error) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
             
             // Decrease active downloads counter when task finishes.
             strongSelf.activeDownloads--;
             
-            // If only one file remains active, trigger finalization.
-            if (strongSelf.activeDownloads == 1) {
+            // Trigger finalization only when no downloads remain.
+            if (strongSelf.activeDownloads == 0) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    NSLog(@"[MCDL] Only one file remaining, proceeding to finalization.");
+                    NSLog(@"[MCDL] All downloads completed, proceeding to finalization.");
                     [strongSelf finalizeDownloads];
                 });
             }
             
             if (strongSelf.progress.cancelled) {
-                // If cancelled, ignore errors.
+                NSLog(@"[MCDL] Download cancelled for %@", name);
             } else if (error != nil) {
                 [strongSelf finishDownloadWithError:error file:name];
             } else if (![strongSelf checkSHA:sha forFile:path altName:altName]) {
                 [strongSelf finishDownloadWithErrorString:[NSString stringWithFormat:
                     @"Failed to verify file %@: SHA1 mismatch", path.lastPathComponent]];
             } else {
-                // Mark childProgress as "finished" by forcibly setting completed to total.
+                // Mark the child progress as complete.
                 if (childProgress) {
                     [childProgress willChangeValueForKey:@"fractionCompleted"];
                     childProgress.completedUnitCount = childProgress.totalUnitCount;
@@ -102,10 +105,9 @@
         }
     ];
     
-    // If a valid task was created, add it to overall progress and file list.
+    // If a valid task was created, add it to overall progress and file tracking.
     if (task) {
         childProgress = [self.manager downloadProgressForTask:task];
-        // Set the progress total to the actual file size (in bytes).
         childProgress.totalUnitCount = size;
         [self addChildProgress:childProgress];
         
@@ -131,7 +133,6 @@
             }
         }
         
-        // Keep the childProgress in progressList for the UI.
         @synchronized(self.progressList) {
             [self.progressList addObject:childProgress];
         }
@@ -140,23 +141,23 @@
     return task;
 }
 
-// Convenience method without the 'success' callback.
 - (NSURLSessionDownloadTask *)createDownloadTask:(NSString *)url
-                                           size:(NSUInteger)size
-                                            sha:(NSString *)sha
-                                        altName:(NSString *)altName
+                                            size:(NSUInteger)size
+                                             sha:(NSString *)sha
+                                         altName:(NSString *)altName
                                           toPath:(NSString *)path
 {
     return [self createDownloadTask:url size:size sha:sha altName:altName toPath:path success:nil];
 }
 
-// Updated addChildProgress method that uses the actual file size for progress.
 - (void)addChildProgress:(NSProgress *)childProgress {
     childProgress.kind = NSProgressKindFile;
     [self.progress addChild:childProgress withPendingUnitCount:childProgress.totalUnitCount];
     self.progress.totalUnitCount += childProgress.totalUnitCount;
     self.textProgress.totalUnitCount = self.progress.totalUnitCount;
 }
+
+#pragma mark - Download Workflow Methods
 
 // Download version metadata.
 - (void)downloadVersionMetadata:(NSDictionary *)version success:(void(^)(void))success {
@@ -190,7 +191,7 @@
             }
         }
         [MinecraftResourceUtils tweakVersionJson:strongSelf.metadata];
-        success();
+        if (success) success();
     };
     
     if (!version) {
@@ -226,7 +227,7 @@
 - (void)downloadAssetMetadataWithSuccess:(void(^)(void))success {
     NSDictionary *assetIndex = self.metadata[@"assetIndex"];
     if (!assetIndex) {
-        success();
+        if (success) success();
         return;
     }
     NSString *name = [NSString stringWithFormat:@"assets/indexes/%@.json", assetIndex[@"id"]];
@@ -236,7 +237,7 @@
     NSUInteger size = [assetIndex[@"size"] unsignedLongLongValue];
     NSURLSessionDownloadTask *task = [self createDownloadTask:url size:size sha:sha altName:name toPath:path success:^{
         self.metadata[@"assetIndexObj"] = parseJSONFromFile(path);
-        success();
+        if (success) success();
     }];
     [task resume];
 }
@@ -249,22 +250,20 @@
         NSMutableDictionary *artifact = library[@"downloads"][@"artifact"];
         if (artifact == nil && [name containsString:@":"]) {
             NSLog(@"[MCDL] Unknown artifact object for %@, generating", name);
-            artifact = [[NSMutableDictionary alloc] init];
+            artifact = [NSMutableDictionary new];
             NSString *prefix = library[@"url"] == nil
                 ? @"https://libraries.minecraft.net/"
                 : [library[@"url"] stringByReplacingOccurrencesOfString:@"http://" withString:@"https://"];
             NSArray *libParts = [name componentsSeparatedByString:@":"];
-            artifact[@"path"] = [NSString stringWithFormat:
-                @"%1$@/%2$@/%3$@/%2$@-%3$@.jar",
+            artifact[@"path"] = [NSString stringWithFormat:@"%@/%@/%@/%@-%@.jar",
                 [libParts[0] stringByReplacingOccurrencesOfString:@"." withString:@"/"],
-                libParts[1],
-                libParts[2]
-            ];
+                libParts[1], libParts[2], libParts[1], libParts[2]];
             artifact[@"url"] = [NSString stringWithFormat:@"%@%@", prefix, artifact[@"path"]];
             artifact[@"sha1"] = library[@"checksums"][0];
         }
         
-        NSString *path = [NSString stringWithFormat:@"%s/libraries/%@", getenv("POJAV_GAME_DIR"), artifact[@"path"]];
+        NSString *path = [NSString stringWithFormat:@"%s/libraries/%@",
+                          getenv("POJAV_GAME_DIR"), artifact[@"path"]];
         NSString *sha = artifact[@"sha1"];
         NSUInteger size = [artifact[@"size"] unsignedLongLongValue];
         NSString *url = artifact[@"url"];
@@ -300,17 +299,20 @@
         
         NSString *path;
         if ([assets[@"map_to_resources"] boolValue]) {
-            path = [NSString stringWithFormat:@"%s/resources/%@", getenv("POJAV_GAME_DIR"), name];
+            path = [NSString stringWithFormat:@"%s/resources/%@",
+                    getenv("POJAV_GAME_DIR"), name];
         } else {
-            path = [NSString stringWithFormat:@"%s/assets/objects/%@", getenv("POJAV_GAME_DIR"), pathname];
+            path = [NSString stringWithFormat:@"%s/assets/objects/%@",
+                    getenv("POJAV_GAME_DIR"), pathname];
         }
         
         if ([name hasSuffix:@"/minecraft.icns"]) {
-            [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             continue;
         }
         
-        NSString *url = [NSString stringWithFormat:@"https://resources.download.minecraft.net/%@", pathname];
+        NSString *url = [NSString stringWithFormat:@"https://resources.download.minecraft.net/%@",
+                         pathname];
         NSURLSessionDownloadTask *task =
             [self createDownloadTask:url size:size sha:hash altName:name toPath:path success:nil];
         if (task) {
@@ -329,7 +331,6 @@
         [self downloadAssetMetadataWithSuccess:^{
             NSArray *libTasks = [self downloadClientLibraries];
             NSArray *assetTasks = [self downloadClientAssets];
-            // Remove the fake byte workaround entirely. The totalUnitCount is dynamically built.
             if (self.progress.totalUnitCount == 0) {
                 self.progress.totalUnitCount = 1;
                 self.progress.completedUnitCount = 1;
@@ -371,7 +372,6 @@
     [task resume];
 }
 
-// Prepare data for a new set of downloads.
 - (void)prepareForDownload {
     self.textProgress = [NSProgress new];
     self.textProgress.kind = NSProgressKindFile;
@@ -379,25 +379,26 @@
     self.textProgress.totalUnitCount = -1;
     
     self.progress = [NSProgress new];
-    self.progress.totalUnitCount = 0; // Total is built dynamically.
+    self.progress.totalUnitCount = 0; // Will be built dynamically.
     [self.fileList removeAllObjects];
     [self.progressList removeAllObjects];
 }
 
-// New public method implementation to finalize downloads.
 - (void)finalizeDownloads {
     self.progress.completedUnitCount = self.progress.totalUnitCount;
     self.textProgress.completedUnitCount = self.progress.totalUnitCount;
     NSLog(@"Finalizing downloads...");
 }
 
-#pragma mark - On Error
+#pragma mark - Error Handling
 
 - (void)finishDownloadWithErrorString:(NSString *)error {
     [self.progress cancel];
     [self.manager invalidateSessionCancelingTasks:YES resetSession:YES];
     showDialog(localize(@"Error", nil), error);
-    self.handleError();
+    if (self.handleError) {
+        self.handleError();
+    }
 }
 
 - (void)finishDownloadWithError:(NSError *)error file:(NSString *)file {
@@ -411,7 +412,7 @@
 
 - (BOOL)checkAccessWithDialog:(BOOL)show {
     BOOL accessible = [BaseAuthenticator.current.authData[@"username"] hasPrefix:@"Demo."] ||
-                   (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
+                      (BaseAuthenticator.current.authData[@"xboxGamertag"] != nil);
     if (!accessible) {
         [self.progress cancel];
         if (show) {
@@ -425,7 +426,7 @@
 
 - (BOOL)checkSHAIgnorePref:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
     if (sha.length == 0) {
-        BOOL existence = [NSFileManager.defaultManager fileExistsAtPath:path];
+        BOOL existence = [[NSFileManager defaultManager] fileExistsAtPath:path];
         if (existence) {
             NSLog(@"[MCDL] Warning: no SHA for %@, assuming okay", (altName ?: path.lastPathComponent));
         }
@@ -452,16 +453,8 @@
     return check;
 }
 
-- (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName logSuccess:(BOOL)logSuccess {
-    if (getPrefBool(@"general.check_sha")) {
-        return [self checkSHAIgnorePref:sha forFile:path altName:altName logSuccess:logSuccess];
-    } else {
-        return [NSFileManager.defaultManager fileExistsAtPath:path];
-    }
-}
-
 - (BOOL)checkSHA:(NSString *)sha forFile:(NSString *)path altName:(NSString *)altName {
-    return [self checkSHA:sha forFile:path altName:altName logSuccess:(altName == nil)];
+    return [self checkSHAIgnorePref:sha forFile:path altName:altName logSuccess:NO];
 }
 
 @end
