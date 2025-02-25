@@ -30,18 +30,14 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 @interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
 
-// These properties are declared in the header so they are not redeclared here.
+// Only redeclare properties that are not declared in the header.
 @property(nonatomic) MinecraftResourceDownloadTask *task;
 @property(nonatomic) DownloadProgressViewController *progressVC;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
-@property(nonatomic, strong) UIButton *buttonInstall; // Assumed to be declared in the header
-@property(nonatomic, strong) UIProgressView *progressViewMain;
-@property(nonatomic, strong) UILabel *progressText;
 
-// New property for modloader install logic
-@property(nonatomic, assign) BOOL modloaderInstallPending;
+// Do not redeclare buttonInstall, progressViewMain, or progressText here since they are in the header.
 
 #pragma mark - Modloader Installation
 - (void)updateModloaderInstallStatus;
@@ -221,7 +217,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.versionTextField.frame = CGRectMake(4, 4, self.toolbar.frame.size.width * 0.8 - 8, self.toolbar.frame.size.height - 8);
     self.progressViewMain.frame = CGRectMake(0, 0, self.toolbar.frame.size.width, 4);
     // Adjust the button frame to ensure it's visible.
-    // You can tweak these multipliers if needed.
     self.buttonInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.8, 4, self.toolbar.frame.size.width * 0.2, self.toolbar.frame.size.height - 8);
     [sidebarViewController updateAccountInfo];
 }
