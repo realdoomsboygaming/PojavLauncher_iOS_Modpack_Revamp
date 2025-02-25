@@ -34,10 +34,44 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
-@property(nonatomic, strong) UIButton *buttonModloaderInstall; // New: Install Modloader button
+@property(nonatomic, assign) BOOL modloaderInstallPending;  // New: YES if a modloader installer file exists.
 @end
 
 @implementation LauncherNavigationController
+
+#pragma mark - Modloader Install Status
+
+- (void)updateModloaderInstallStatus {
+    NSDictionary *profile = PLProfiles.current.profiles[PLProfiles.current.selectedProfileName];
+    if (!profile) {
+        self.modloaderInstallPending = NO;
+        [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
+        return;
+    }
+    NSString *gameDir = profile[@"gameDir"];
+    if (!gameDir.length) {
+        self.modloaderInstallPending = NO;
+        [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
+        return;
+    }
+    // Construct full modpack path.
+    NSString *modpackPath = [[NSFileManager defaultManager] currentDirectoryPath];
+    if ([gameDir hasPrefix:@"./"]) {
+        gameDir = [gameDir substringFromIndex:2];
+    }
+    NSString *fullPath = [modpackPath stringByAppendingPathComponent:gameDir];
+    NSError *error = nil;
+    NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:fullPath error:&error];
+    if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
+         self.modloaderInstallPending = YES;
+         [self.buttonInstall setTitle:localize(@"Install", nil) forState:UIControlStateNormal];
+    } else {
+         self.modloaderInstallPending = NO;
+         [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
+    }
+}
+
+#pragma mark - View Lifecycle
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -78,29 +112,19 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
     
-    // Existing "Play" button.
+    // Use the existing play button.
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     setButtonPointerInteraction(self.buttonInstall);
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.autoresizingMask = AUTORESIZE_MASKS;
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
+    // Position the button (adjust frame as needed).
     self.buttonInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.82, 4, self.toolbar.frame.size.width * 0.16, self.toolbar.frame.size.height - 8);
     self.buttonInstall.tintColor = UIColor.whiteColor;
     self.buttonInstall.enabled = NO;
     [self.buttonInstall addTarget:self action:@selector(performInstallOrShowDetails:) forControlEvents:UIControlEventPrimaryActionTriggered];
     [targetToolbar addSubview:self.buttonInstall];
-    
-    // New "Install Modloader" button.
-    self.buttonModloaderInstall = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.buttonModloaderInstall setTitle:@"Install" forState:UIControlStateNormal];
-    self.buttonModloaderInstall.autoresizingMask = AUTORESIZE_MASKS;
-    self.buttonModloaderInstall.backgroundColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0];
-    self.buttonModloaderInstall.layer.cornerRadius = 5;
-    // Position this button to the left of the Play button.
-    self.buttonModloaderInstall.frame = CGRectMake(self.toolbar.frame.size.width * 0.64, 4, self.toolbar.frame.size.width * 0.16, self.toolbar.frame.size.height - 8);
-    [self.buttonModloaderInstall addTarget:self action:@selector(installModloaderAction) forControlEvents:UIControlEventPrimaryActionTriggered];
-    [targetToolbar addSubview:self.buttonModloaderInstall];
     
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
     self.progressText.adjustsFontSizeToFitWidth = YES;
@@ -127,12 +151,40 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 }
 
-#pragma mark - New: Install Modloader Action
-- (void)installModloaderAction {
-    [self checkAndInstallModloaderIfNeeded];
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self reloadProfileList]; // Refresh profile list
+    [self updateModloaderInstallStatus]; // Update the play button text based on installer file
 }
 
-#pragma mark - New: Automatic Modloader Installation
+#pragma mark - Play Button Action
+
+- (void)performInstallOrShowDetails:(UIButton *)sender {
+    if (self.modloaderInstallPending) {
+        // If a modloader installer file is present, trigger installation.
+        [self checkAndInstallModloaderIfNeeded];
+        // After installation, update the button title back to "Play".
+        self.modloaderInstallPending = NO;
+        [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
+        return;
+    }
+    
+    // Normal behavior: if a download task exists, show its progress; otherwise launch Minecraft.
+    if (self.task) {
+        if (!self.progressVC) {
+            self.progressVC = [[DownloadProgressViewController alloc] initWithTask:self.task];
+        }
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:self.progressVC];
+        nav.modalPresentationStyle = UIModalPresentationPopover;
+        nav.popoverPresentationController.sourceView = sender;
+        [self presentViewController:nav animated:YES completion:nil];
+    } else {
+        [self launchMinecraft:sender];
+    }
+}
+
+#pragma mark - Automatic Modloader Installation
+
 - (void)autoInstallForgeWithVanillaVersion:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer {
     NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"CURSEFORGE_API_KEY"];
     if (!apiKey) {
@@ -148,7 +200,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     if (!profile) return;
     NSString *gameDir = profile[@"gameDir"];
     if (!gameDir.length) return;
-    // Assume gameDir is relative (e.g. "./custom_gamedir/ModpackName")
     NSString *modpackPath = [[NSFileManager defaultManager] currentDirectoryPath];
     if ([gameDir hasPrefix:@"./"]) {
         gameDir = [gameDir substringFromIndex:2];
@@ -159,7 +210,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     if (installerInfo && [installerInfo[@"installOnFirstLaunch"] boolValue]) {
         NSString *loaderType = installerInfo[@"loaderType"];
         if ([loaderType isEqualToString:@"forge"]) {
-            // For Forge, automatically trigger installation without further UI.
             NSString *versionString = installerInfo[@"versionString"];
             NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
             if (components.count == 2) {
@@ -170,7 +220,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                 NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
             }
         } else if ([loaderType isEqualToString:@"fabric"]) {
-            // For Fabric, present the installer UI.
             FabricInstallViewController *vc = [FabricInstallViewController new];
             [self presentViewController:vc animated:YES completion:nil];
         }
@@ -178,13 +227,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         NSString *installerPath = [fullPath stringByAppendingPathComponent:@"modloader_installer.json"];
         [[NSFileManager defaultManager] removeItemAtPath:installerPath error:nil];
     }
-}
-
-#pragma mark - View Controller Lifecycle
-
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    [self checkAndInstallModloaderIfNeeded];
 }
 
 #pragma mark - Profile & Version Management
@@ -336,6 +378,13 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 - (void)performInstallOrShowDetails:(UIButton *)sender {
+    if (self.modloaderInstallPending) {
+        [self checkAndInstallModloaderIfNeeded];
+        self.modloaderInstallPending = NO;
+        [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
+        return;
+    }
+    
     if (self.task) {
         if (!self.progressVC) {
             self.progressVC = [[DownloadProgressViewController alloc] initWithTask:self.task];
