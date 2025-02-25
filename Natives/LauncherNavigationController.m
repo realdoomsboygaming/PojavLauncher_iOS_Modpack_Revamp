@@ -40,12 +40,12 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 // New property for modloader install logic
 @property(nonatomic, assign) BOOL modloaderInstallPending;
 
-// Declare new method so its selector is visible.
-- (void)invokeAfterJITEnabled:(void(^)(void))handler;
-
 #pragma mark - Modloader Installation
 - (void)updateModloaderInstallStatus;
 - (void)checkAndInstallModloaderIfNeeded;
+
+// The button property (assumed to be declared in the header)
+@property(nonatomic, strong) UIButton *buttonInstall;
 
 @end
 
@@ -164,8 +164,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
     
-    // Configure the play/install button (buttonInstall)
+    // Initialize the play/install button (buttonInstall)
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
+    // Configure the play/install button (buttonInstall)
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
