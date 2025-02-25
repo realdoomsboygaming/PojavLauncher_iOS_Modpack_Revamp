@@ -17,7 +17,7 @@
 #import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#import "ModloaderInstaller.h" 
+#import "/installer/modpack/ModloaderInstaller.h" 
 
 #include <sys/time.h>
 
