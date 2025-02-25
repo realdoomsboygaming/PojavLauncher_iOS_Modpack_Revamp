@@ -36,11 +36,10 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 @property(nonatomic) PLPickerView *versionPickerView;
 @property(nonatomic) UITextField *versionTextField;
 @property(nonatomic) int profileSelectedAt;
-
+@property(nonatomic) UIButton *buttonInstall; // Assumed to be declared somewhere
 // New properties/methods
 @property(nonatomic, assign) BOOL modloaderInstallPending;  // YES if a modloader installer file exists
-- (void)invokeAfterJITEnabled:(void(^)(void))handler; // Declare method prototype
-
+- (void)invokeAfterJITEnabled:(void(^)(void))handler; // Added declaration so the selector is known
 @end
 
 @implementation LauncherNavigationController
@@ -162,7 +161,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self updateModloaderInstallStatus];
 }
 
-#pragma mark - Play Button Action
+#pragma mark - Play/Install Button Action
 
 - (void)performInstallOrShowDetails:(UIButton *)sender {
     if (self.modloaderInstallPending) {
@@ -379,26 +378,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     });
 }
 
-- (void)performInstallOrShowDetails:(UIButton *)sender {
-    if (self.modloaderInstallPending) {
-        [self checkAndInstallModloaderIfNeeded];
-        self.modloaderInstallPending = NO;
-        [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
-        return;
-    }
-    
-    if (self.task) {
-        if (!self.progressVC) {
-            self.progressVC = [[DownloadProgressViewController alloc] initWithTask:self.task];
-        }
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:self.progressVC];
-        nav.modalPresentationStyle = UIModalPresentationPopover;
-        nav.popoverPresentationController.sourceView = sender;
-        [self presentViewController:nav animated:YES completion:nil];
-    } else {
-        [self launchMinecraft:sender];
-    }
-}
+#pragma mark - KVO
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if (context != ProgressObserverContext) {
@@ -407,7 +387,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
     
     static CGFloat lastMsTime;
-    static NSUInteger lastSecTime, lastCompletedUnitCount;  // Fixed typo here: NSUInteger
+    static NSUInteger lastSecTime, lastCompletedUnitCount;  // Corrected type
     NSProgress *progress = self.task.textProgress;
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -442,6 +422,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     });
 }
 
+#pragma mark - Notifications
+
 - (void)receiveNotification:(NSNotification *)notification {
     if (![notification.name isEqualToString:@"InstallModpack"]) return;
     [self setInteractionEnabled:NO forDownloading:YES];
@@ -466,6 +448,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         });
     });
 }
+
+#pragma mark - JIT Handling
 
 - (void)invokeAfterJITEnabled:(void(^)(void))handler {
     localVersionList = remoteVersionList = nil;
@@ -507,7 +491,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return UIModalPresentationNone;
 }
 
-#pragma mark - UIPickerView Stuff
+#pragma mark - UIPickerView Methods
 
 - (void)pickerView:(PLPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
     self.profileSelectedAt = row;
