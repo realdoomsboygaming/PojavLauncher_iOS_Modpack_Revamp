@@ -30,7 +30,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 @interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
 
-// These properties are declared in the header (e.g. buttonInstall) so they are not redeclared here.
+// These properties are declared in the header so they are not redeclared here.
 @property(nonatomic) MinecraftResourceDownloadTask *task;
 @property(nonatomic) DownloadProgressViewController *progressVC;
 @property(nonatomic) PLPickerView *versionPickerView;
@@ -42,6 +42,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 // Declare new method so its selector is visible.
 - (void)invokeAfterJITEnabled:(void(^)(void))handler;
+
+#pragma mark - Modloader Installation
+- (void)updateModloaderInstallStatus;
+- (void)checkAndInstallModloaderIfNeeded;
+
 @end
 
 @implementation LauncherNavigationController
@@ -61,7 +66,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
         return;
     }
-    // Construct full modpack path.
+    // Construct full modpack path using the current directory and gameDir.
     NSString *modpackPath = [[NSFileManager defaultManager] currentDirectoryPath];
     if ([gameDir hasPrefix:@"./"]) {
         gameDir = [gameDir substringFromIndex:2];
@@ -159,8 +164,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
     
-    // Use the existing play button
-    // (Assuming buttonInstall is already declared in the header)
+    // Use the existing play button (buttonInstall)
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
     self.buttonInstall.backgroundColor = [UIColor colorWithRed:54/255.0 green:176/255.0 blue:48/255.0 alpha:1.0];
     self.buttonInstall.layer.cornerRadius = 5;
@@ -337,7 +341,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     });
 }
 
-#pragma mark - JIT Handling
+#pragma mark - JIT and Modal Handling
 
 - (void)invokeAfterJITEnabled:(void(^)(void))handler {
     localVersionList = remoteVersionList = nil;
@@ -459,42 +463,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self enterModInstallerWithPath:url.path hitEnterAfterWindowShown:NO];
 }
 
-#pragma mark - JIT and Modal Handling
-
-- (void)invokeAfterJITEnabled:(void(^)(void))handler {
-    localVersionList = remoteVersionList = nil;
-    BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
-    
-    if (isJITEnabled(false)) {
-        [ALTServerManager.sharedManager stopDiscovering];
-        handler();
-        return;
-    } else if (hasTrollStoreJIT) {
-        NSURL *jitURL = [NSURL URLWithString:[NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", NSBundle.mainBundle.bundleIdentifier]];
-        [UIApplication.sharedApplication openURL:jitURL options:@{} completionHandler:nil];
-    } else if (getPrefBool(@"debug.debug_skip_wait_jit")) {
-        NSLog(@"Debug option skipped waiting for JIT. Java might not work.");
-        handler();
-        return;
-    }
-    
-    self.progressText.text = localize(@"launcher.wait_jit.title", nil);
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
-                                                                       message:(hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil))
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:alert animated:YES completion:nil];
-    
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        while (!isJITEnabled(false)) {
-            usleep(1000 * 200);
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [alert dismissViewControllerAnimated:YES completion:handler];
-        });
-    });
-}
-
 #pragma mark - UIPickerView Methods
 
 - (void)pickerView:(PLPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
@@ -516,7 +484,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return PLProfiles.current.profiles.allValues[row][@"name"];
 }
 
-- (void)pickerView:(UIPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
+- (void)pickerView:(PLPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
     UIImage *fallbackImage = [[UIImage imageNamed:@"DefaultProfile"] _imageWithSize:CGSizeMake(40, 40)];
     NSString *urlString = PLProfiles.current.profiles.allValues[row][@"icon"];
     [imageView setImageWithURL:[NSURL URLWithString:urlString] placeholderImage:fallbackImage];
