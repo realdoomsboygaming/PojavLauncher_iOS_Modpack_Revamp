@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)searchModWithFilters:(NSDictionary *)searchFilters previousPageResult:(NSMutableArray *)prevResult completion:(void (^ _Nonnull)(NSMutableArray * _Nullable results, NSError * _Nullable error))completion;
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item completion:(void (^ _Nonnull)(NSError * _Nullable error))completion;
 - (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion completion:(void (^ _Nonnull)(NSError * _Nullable error))completion;
+- (void)autoInstallForge:(NSString *)vanillaVer loaderVersion:(NSString *)forgeVer;
 
 @property (nonatomic, weak, nullable) UIViewController *parentViewController;
 
