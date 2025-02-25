@@ -255,16 +255,18 @@
         [task resume];
     }
 
-    // Set profile information
+    // Set profile information using a mutable dictionary
     NSString *tmpIconPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"icon.png"];
-    NSDictionary *profileInfo = @{
+    NSData *iconData = [NSData dataWithContentsOfFile:tmpIconPath];
+    NSString *base64Icon = iconData ? [iconData base64EncodedStringWithOptions:0] : @"";
+
+    NSMutableDictionary *profileInfo = [@{
         @"gameDir": [NSString stringWithFormat:@"./custom_gamedir/%@", destPath.lastPathComponent],
         @"name": indexDict[@"name"] ?: @"",
         @"lastVersionId": depInfo[@"id"] ?: @"",
-        @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@",
-                  [[NSData dataWithContentsOfFile:tmpIconPath] base64EncodedStringWithOptions:0]]
-    };
-    NSLog(@"[ModrinthAPI] Setting profile information: %@", profileInfo);
+        @"icon": [NSString stringWithFormat:@"data:image/png;base64,%@", base64Icon]
+    } mutableCopy];
+
     PLProfiles.current.profiles[indexDict[@"name"]] = profileInfo;
 
     NSLog(@"[ModrinthAPI] Download task submission completed for package: %@", packagePath);
