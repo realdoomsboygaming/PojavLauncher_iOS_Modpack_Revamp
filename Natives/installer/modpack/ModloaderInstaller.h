@@ -32,13 +32,18 @@ NS_ASSUME_NONNULL_BEGIN
 /**
  Performs the modloader installation process by reading the installer file and then
  initiating the download and install process based on the loader type. For Forge,
- it uses CurseForgeAPI to auto-install; for Fabric, it presents the FabricInstallViewController.
-
+ it downloads and launches the installer jar; for Fabric, it automatically selects
+ the appropriate loader version and installs without UI.
+ 
+ This method calls the completion block when the installation process has finished.
+ 
  @param modpackDirectory The path to the modpack directory.
- @param vc The view controller from which to present any necessary UI (for Fabric).
+ @param vc The view controller from which to present any necessary UI.
+ @param completion A block invoked when the installation is complete, with a BOOL indicating success.
  */
 + (void)performModloaderInstallationForModpackDirectory:(NSString *)modpackDirectory
-                                   fromViewController:(UIViewController *)vc;
+                                   fromViewController:(UIViewController *)vc
+                                           completion:(void(^)(BOOL success))completion;
 
 @end
 
