@@ -245,57 +245,64 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self.versionTextField becomeFirstResponder];
         return;
     }
-
+    
     if (BaseAuthenticator.current == nil) {
         UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0] viewControllers][0];
         [view performSelector:@selector(selectAccount:) withObject:sender];
         return;
     }
     
-    // --- New: Automated Modloader Installation ---
+    // NEW: Check if a modloader installer file exists in the selected profile's modpack directory.
     NSString *profileName = self.versionTextField.text;
     NSDictionary *profile = PLProfiles.current.profiles[profileName];
     if (profile) {
-        NSString *gameDir = profile[@"gameDir"];  // e.g. "./custom_gamedir/YourModpack"
+        NSString *gameDir = profile[@"gameDir"];  // e.g., "./custom_gamedir/YourModpack"
         if (gameDir) {
-            // Resolve game directory path relative to POJAV_GAME_DIR
             NSString *baseDir = [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")] ?: @"";
-            NSString *modpackPath = ([gameDir hasPrefix:@"."]) 
-                ? [baseDir stringByAppendingPathComponent:[gameDir substringFromIndex:2]] 
-                : [baseDir stringByAppendingPathComponent:gameDir];
-            
-            // Attempt to read the modloader installer info
-            NSError *readError = nil;
-            NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:modpackPath error:&readError];
+            NSString *modpackPath;
+            if ([gameDir hasPrefix:@"."]) {
+                modpackPath = [baseDir stringByAppendingPathComponent:[gameDir substringFromIndex:2]];
+            } else if (![gameDir hasPrefix:@"/"]) {
+                modpackPath = [baseDir stringByAppendingPathComponent:gameDir];
+            } else {
+                modpackPath = gameDir;
+            }
+            NSError *err = nil;
+            NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:modpackPath error:&err];
             if (installerInfo) {
-                NSString *loaderType = installerInfo[@"loaderType"];
-                NSLog(@"[Launcher] Detected modloader installer for type: %@", loaderType);
-                
-                if ([loaderType isEqualToString:@"fabric"] || [loaderType isEqualToString:@"quilt"]) {
-                    // Present Fabric/Quilt installer UI automatically
-                    [ModloaderInstaller performModloaderInstallationForModpackDirectory:modpackPath 
-                                                                     fromViewController:self];
-                    return; // Wait for user to complete installation
-                } else if ([loaderType isEqualToString:@"forge"] || [loaderType isEqualToString:@"neoforge"]) {
-                    // Auto-install Forge/NeoForge silently
-                    [ModloaderInstaller performModloaderInstallationForModpackDirectory:modpackPath 
-                                                                     fromViewController:self];
-                    // Refresh local versions so the new modloader version is recognized
-                    [self fetchLocalVersionList];
-                }
+                NSLog(@"[Launcher] Detected modloader installer. Halting game launch until installation completes.");
+                // Initiate installation and provide a completion block.
+                [ModloaderInstaller performModloaderInstallationForModpackDirectory:modpackPath
+                                                              fromViewController:self
+                                                                      completion:^(BOOL success) {
+                    if (success) {
+                        // Refresh local versions so that the new modloader version is available.
+                        [self fetchLocalVersionList];
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self setInteractionEnabled:YES forDownloading:YES];
+                            NSLog(@"[Launcher] Modloader installation completed. Please press Play again to launch Minecraft.");
+                        });
+                    } else {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self setInteractionEnabled:YES forDownloading:YES];
+                            NSLog(@"[Launcher] Modloader installation failed.");
+                        });
+                    }
+                }];
+                return; // Do not proceed with launch.
             }
         }
     }
-    // --- End Automated Modloader Installation ---
-
+    
+    // Proceed with normal launch process if no modloader installation is pending.
     [self setInteractionEnabled:NO forDownloading:YES];
-
+    
     NSString *versionId = PLProfiles.current.profiles[self.versionTextField.text][@"lastVersionId"];
     NSDictionary *object = [remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(id == %@)", versionId]].firstObject;
     if (!object) {
         object = @{ @"id": versionId, @"type": @"custom" };
     }
-
+    
     self.task = [MinecraftResourceDownloadTask new];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __weak LauncherNavigationController *weakSelf = self;
@@ -316,6 +323,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         });
     });
 }
+
 
 - (void)performInstallOrShowDetails:(UIButton *)sender {
     if (self.task) {
