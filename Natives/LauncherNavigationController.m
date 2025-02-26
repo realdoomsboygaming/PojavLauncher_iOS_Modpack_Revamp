@@ -17,6 +17,7 @@
 #import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
+#import "installer/modpack/ModloaderInstaller.h"  // New import for modloader support
 
 #include <sys/time.h>
 
@@ -99,9 +100,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
     [self fetchRemoteVersionList];
     [NSNotificationCenter.defaultCenter addObserver:self
-        selector:@selector(receiveNotification:) 
-        name:@"InstallModpack"
-        object:nil];
+                                             selector:@selector(receiveNotification:)
+                                                 name:@"InstallModpack"
+                                               object:nil];
 
     if ([BaseAuthenticator.current isKindOfClass:MicrosoftAuthenticator.class]) {
         // Perform token refreshment on startup
@@ -196,8 +197,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)enterModInstaller {
     UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc]
-        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
-        asCopy:YES];
+                                                        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
+                                                        asCopy:YES];
     documentPicker.delegate = self;
     documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
     [self presentViewController:documentPicker animated:YES completion:nil];
@@ -238,6 +239,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     UIApplication.sharedApplication.idleTimerDisabled = !enabled;
 }
 
+#pragma mark - Updated Launch Flow with Automated Modloader Installation
 - (void)launchMinecraft:(UIButton *)sender {
     if (!self.versionTextField.hasText) {
         [self.versionTextField becomeFirstResponder];
@@ -245,22 +247,53 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
 
     if (BaseAuthenticator.current == nil) {
-        // Present the account selector if none selected
-        UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0]
-        viewControllers][0];
+        UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0] viewControllers][0];
         [view performSelector:@selector(selectAccount:) withObject:sender];
         return;
     }
+    
+    // --- New: Automated Modloader Installation ---
+    NSString *profileName = self.versionTextField.text;
+    NSDictionary *profile = PLProfiles.current.profiles[profileName];
+    if (profile) {
+        NSString *gameDir = profile[@"gameDir"];  // e.g. "./custom_gamedir/YourModpack"
+        if (gameDir) {
+            // Resolve game directory path relative to POJAV_GAME_DIR
+            NSString *baseDir = [NSString stringWithUTF8String:getenv("POJAV_GAME_DIR")] ?: @"";
+            NSString *modpackPath = ([gameDir hasPrefix:@"."]) 
+                ? [baseDir stringByAppendingPathComponent:[gameDir substringFromIndex:2]] 
+                : [baseDir stringByAppendingPathComponent:gameDir];
+            
+            // Attempt to read the modloader installer info
+            NSError *readError = nil;
+            NSDictionary *installerInfo = [ModloaderInstaller readInstallerInfoFromModpackDirectory:modpackPath error:&readError];
+            if (installerInfo) {
+                NSString *loaderType = installerInfo[@"loaderType"];
+                NSLog(@"[Launcher] Detected modloader installer for type: %@", loaderType);
+                
+                if ([loaderType isEqualToString:@"fabric"] || [loaderType isEqualToString:@"quilt"]) {
+                    // Present Fabric/Quilt installer UI automatically
+                    [ModloaderInstaller performModloaderInstallationForModpackDirectory:modpackPath 
+                                                                     fromViewController:self];
+                    return; // Wait for user to complete installation
+                } else if ([loaderType isEqualToString:@"forge"] || [loaderType isEqualToString:@"neoforge"]) {
+                    // Auto-install Forge/NeoForge silently
+                    [ModloaderInstaller performModloaderInstallationForModpackDirectory:modpackPath 
+                                                                     fromViewController:self];
+                    // Refresh local versions so the new modloader version is recognized
+                    [self fetchLocalVersionList];
+                }
+            }
+        }
+    }
+    // --- End Automated Modloader Installation ---
 
     [self setInteractionEnabled:NO forDownloading:YES];
 
     NSString *versionId = PLProfiles.current.profiles[self.versionTextField.text][@"lastVersionId"];
     NSDictionary *object = [remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(id == %@)", versionId]].firstObject;
     if (!object) {
-        object = @{
-            @"id": versionId,
-            @"type": @"custom"
-        };
+        object = @{ @"id": versionId, @"type": @"custom" };
     }
 
     self.task = [MinecraftResourceDownloadTask new];
@@ -277,9 +310,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         dispatch_async(dispatch_get_main_queue(), ^{
             self.progressViewMain.observedProgress = self.task.progress;
             [self.task.progress addObserver:self
-                forKeyPath:@"fractionCompleted"
-                options:NSKeyValueObservingOptionInitial
-                context:ProgressObserverContext];
+                                forKeyPath:@"fractionCompleted"
+                                   options:NSKeyValueObservingOptionInitial
+                                   context:ProgressObserverContext];
         });
     });
 }
@@ -361,9 +394,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         dispatch_async(dispatch_get_main_queue(), ^{
             self.progressViewMain.observedProgress = self.task.progress;
             [self.task.progress addObserver:self
-                forKeyPath:@"fractionCompleted"
-                options:NSKeyValueObservingOptionInitial
-                context:ProgressObserverContext];
+                                forKeyPath:@"fractionCompleted"
+                                   options:NSKeyValueObservingOptionInitial
+                                   context:ProgressObserverContext];
         });
     });
 }
@@ -401,7 +434,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (!isJITEnabled(false)) {
-            // Perform check for every 200ms
+            // Check every 200ms
             usleep(1000*200);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -415,10 +448,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return UIModalPresentationNone;
 }
 
-#pragma mark - UIPickerView stuff
+#pragma mark - UIPickerView Stuff
 - (void)pickerView:(PLPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
     self.profileSelectedAt = row;
-    //((UIImageView *)self.versionTextField.leftView).image = [pickerView imageAtRow:row column:component];
     ((UIImageView *)self.versionTextField.leftView).image = [pickerView imageAtRow:row column:component];
     self.versionTextField.text = [self pickerView:pickerView titleForRow:row forComponent:component];
     PLProfiles.current.selectedProfileName = self.versionTextField.text;
@@ -447,7 +479,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self pickerView:self.versionPickerView didSelectRow:[self.versionPickerView selectedRowInComponent:0] inComponent:0];
 }
 
-#pragma mark - View controller UI mode
+#pragma mark - View Controller UI Mode
 
 - (BOOL)prefersHomeIndicatorAutoHidden {
     return YES;
