@@ -1,6 +1,9 @@
 #import "ModloaderInstaller.h"
 #import "CurseForgeAPI.h"
 #import "installer/FabricInstallViewController.h"
+#import "LauncherNavigationController.h"   
+#import "JavaGUIViewController.h"           
+#import "AFNetworking.h"                   
 #import <UIKit/UIKit.h>
 
 @implementation ModloaderInstaller
@@ -70,48 +73,46 @@
 }
 
 + (void)performModloaderInstallationForModpackDirectory:(NSString *)modpackDirectory
-                                    fromViewController:(UIViewController *)vc {
+                                   fromViewController:(UIViewController *)vc {
     NSError *error = nil;
     NSDictionary *installerInfo = [self readInstallerInfoFromModpackDirectory:modpackDirectory error:&error];
     if (!installerInfo) {
         NSLog(@"[ModloaderInstaller] Error reading installer info: %@", error.localizedDescription);
         return;
     }
+    
     if ([installerInfo[@"installOnFirstLaunch"] boolValue]) {
         NSString *loaderType = installerInfo[@"loaderType"];
         if ([loaderType isEqualToString:@"forge"]) {
-            // Parse Forge version (format expected: "<MCVersion>-forge-<ForgeVersion>")
+            // Parse Forge version (expected format: "<MCVersion>-forge-<ForgeVersion>")
             NSString *versionString = installerInfo[@"versionString"];
             NSArray *components = [versionString componentsSeparatedByString:@"-forge-"];
             if (components.count == 2) {
                 NSString *vanillaVer = components[0];
                 NSString *forgeVer   = components[1];
-                // Construct Forge installer URL (official Maven)
                 NSString *combinedVer = [NSString stringWithFormat:@"%@-%@", vanillaVer, forgeVer];
+                // Construct the official Forge installer URL from Maven repository
                 NSString *forgeURL = [NSString stringWithFormat:@"https://maven.minecraftforge.net/net/minecraftforge/forge/%@/forge-%@-installer.jar", combinedVer, combinedVer];
-                // Download Forge installer jar to a temporary location
                 NSString *outPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"forge-installer.jar"];
-                [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];  // remove if existing
+                // Remove any existing file
+                [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
                 dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                     NSData *jarData = [NSData dataWithContentsOfURL:[NSURL URLWithString:forgeURL]];
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if (!jarData) {
                             NSLog(@"[ModloaderInstaller] Failed to download Forge installer from %@", forgeURL);
                         } else {
-                            // Save the downloaded jar
                             [jarData writeToFile:outPath atomically:YES];
                             NSLog(@"[ModloaderInstaller] Forge installer downloaded to %@", outPath);
-                            // Launch the jar via the Java GUI installer
-                            LauncherNavigationController *navVC = nil;
+                            // Try to obtain a LauncherNavigationController from vc to call enterModInstallerWithPath:
                             if ([vc isKindOfClass:[LauncherNavigationController class]]) {
-                                navVC = (LauncherNavigationController *)vc;
-                            } else if ([vc navigationController] && [[vc navigationController] isKindOfClass:[LauncherNavigationController class]]) {
-                                navVC = (LauncherNavigationController *)[vc navigationController];
-                            }
-                            if (navVC) {
+                                LauncherNavigationController *navVC = (LauncherNavigationController *)vc;
+                                [navVC enterModInstallerWithPath:outPath hitEnterAfterWindowShown:YES];
+                            } else if (vc.navigationController && [vc.navigationController isKindOfClass:[LauncherNavigationController class]]) {
+                                LauncherNavigationController *navVC = (LauncherNavigationController *)vc.navigationController;
                                 [navVC enterModInstallerWithPath:outPath hitEnterAfterWindowShown:YES];
                             } else {
-                                // Fallback: present JavaGUIViewController directly
+                                // Fallback: Present the Java GUI installer directly.
                                 JavaGUIViewController *installerVC = [[JavaGUIViewController alloc] init];
                                 installerVC.filepath = outPath;
                                 installerVC.hitEnterAfterWindowShown = YES;
@@ -130,43 +131,42 @@
                 NSLog(@"[ModloaderInstaller] Unable to parse version string: %@", versionString);
             }
         } else if ([loaderType isEqualToString:@"fabric"]) {
-            // Determine if a beta (unstable) loader is requested
-            NSString *versionStr = installerInfo[@"versionString"];   // e.g. "1.20.1" or "1.20.1-beta"
+            // For Fabric, we no longer present the FabricInstallViewController UI.
+            // Instead, we automatically fetch the appropriate loader version.
+            // Determine if a beta loader is desired based on the version string.
+            NSString *versionStr = installerInfo[@"versionString"]; // e.g. "1.20.1" or "1.20.1-beta"
             BOOL useBetaLoader = NO;
             NSString *gameVersion = versionStr;
             NSRange betaRange = [versionStr rangeOfString:@"beta" options:NSCaseInsensitiveSearch];
             if (betaRange.location != NSNotFound) {
                 useBetaLoader = YES;
-                // Remove "beta" marker to get the actual game version string
                 NSMutableString *cleanVersion = [versionStr mutableCopy];
                 [cleanVersion replaceCharactersInRange:betaRange withString:@""];
                 gameVersion = [cleanVersion stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"- "]];
             }
             NSLog(@"[ModloaderInstaller] Installing Fabric for Minecraft %@ (Loader: %@)", gameVersion, useBetaLoader ? @"Latest Beta" : @"Latest Release");
-            // Fetch all Fabric loader versions for the given game version
+            // Fetch Fabric loader versions for the given game version
             NSString *loaderMetaURL = [NSString stringWithFormat:@"https://meta.fabricmc.net/v2/versions/loader/%@", gameVersion];
             AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-            [manager GET:loaderMetaURL parameters:nil headers:nil progress:nil 
+            [manager GET:loaderMetaURL parameters:nil headers:nil progress:nil
                  success:^(NSURLSessionTask *task, NSArray *responseObject) {
-                     // Find the latest appropriate loader version (stable or unstable)
                      NSString *selectedLoaderVersion = nil;
                      for (NSDictionary *entry in responseObject) {
                          NSDictionary *loaderInfo = entry[@"loader"];
                          BOOL isStable = [loaderInfo[@"stable"] boolValue];
                          if (useBetaLoader) {
-                             if (!isStable) {  // pick the first unstable version
+                             if (!isStable) {
                                  selectedLoaderVersion = loaderInfo[@"version"];
                                  break;
                              }
                          } else {
-                             if (isStable) {    // pick the first stable version
+                             if (isStable) {
                                  selectedLoaderVersion = loaderInfo[@"version"];
                                  break;
                              }
                          }
                      }
                      if (!selectedLoaderVersion && responseObject.count > 0) {
-                         // Fallback to first entry if none matched criteria
                          selectedLoaderVersion = [responseObject[0][@"loader"][@"version"] copy];
                          NSLog(@"[ModloaderInstaller] No %@ loader found; using %@ as fallback.",
                                useBetaLoader ? @"unstable" : @"stable", selectedLoaderVersion);
@@ -177,7 +177,7 @@
                      }
                      // Download the Fabric profile JSON for the selected loader and game version
                      NSString *profileURL = [NSString stringWithFormat:@"https://meta.fabricmc.net/v2/versions/loader/%@/%@/profile/json", gameVersion, selectedLoaderVersion];
-                     [manager GET:profileURL parameters:nil headers:nil progress:nil 
+                     [manager GET:profileURL parameters:nil headers:nil progress:nil
                           success:^(NSURLSessionTask *task, id profileResponse) {
                               if (![profileResponse isKindOfClass:[NSDictionary class]]) {
                                   NSLog(@"[ModloaderInstaller] Unexpected response for Fabric profile JSON.");
@@ -185,7 +185,6 @@
                               }
                               NSDictionary *profileJson = (NSDictionary *)profileResponse;
                               NSString *versionId = profileJson[@"id"];
-                              // Create directory for the new version and save the JSON
                               const char *gameDirC = getenv("POJAV_GAME_DIR");
                               if (!gameDirC) {
                                   NSLog(@"[ModloaderInstaller] POJAV_GAME_DIR not set; cannot save Fabric profile.");
@@ -216,13 +215,13 @@
                      NSLog(@"[ModloaderInstaller] Failed to fetch Fabric loader versions: %@", error.localizedDescription);
                  }];
         }
-        // Remove the installer file after initiating installation
+        // Remove installer file after processing
         NSString *installerPath = [modpackDirectory stringByAppendingPathComponent:@"modloader_installer.json"];
-        if (![[NSFileManager defaultManager] removeItemAtPath:installerPath error:nil]) {
-            NSLog(@"[ModloaderInstaller] Failed to remove installer file.");
+        NSError *removeError = nil;
+        if (![[NSFileManager defaultManager] removeItemAtPath:installerPath error:&removeError]) {
+            NSLog(@"[ModloaderInstaller] Failed to remove installer file: %@", removeError.localizedDescription);
         }
     }
 }
-
 
 @end
