@@ -1,49 +1,54 @@
-#import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
 @interface ModloaderInstaller : NSObject
 
 /**
- Creates an installer file in the given modpack directory.
-
- @param modpackDirectory The path to the modpack directory.
- @param versionString The parsed version string (e.g. "1.20.1-forge-43.1.0").
- @param loaderType A string indicating the mod loader type (e.g. @"forge", @"fabric").
- @param error An optional error pointer.
- @return YES if the file was successfully created; otherwise NO.
+ Creates an installer file (modloader_installer.json) in the given modpack directory.
+ This file contains the loader type (e.g. "forge" or "fabric") and the version string
+ that should be installed.
+ 
+ @param modpackDir The directory of the modpack.
+ @param versionString The version string for the modloader.
+ @param loaderType The type of modloader ("forge" or "fabric").
+ @param error On input, a pointer to an NSError object that, if an error occurs, will be set to an error object.
+ @return YES if the file was created successfully; NO otherwise.
  */
-+ (BOOL)createInstallerFileInModpackDirectory:(NSString *)modpackDirectory
++ (BOOL)createInstallerFileInModpackDirectory:(NSString *)modpackDir
                              withVersionString:(NSString *)versionString
-                                   loaderType:(NSString *)loaderType
-                                        error:(NSError **)error;
+                                     loaderType:(NSString *)loaderType
+                                          error:(NSError **)error;
 
 /**
- Reads the installer file from the given modpack directory.
-
- @param modpackDirectory The path to the modpack directory.
- @param error An optional error pointer.
- @return A dictionary with installer info if the file exists and is valid; otherwise nil.
+ Reads the installer info from the modpack directory.
+ 
+ @param modpackDir The modpack directory.
+ @param error If an error occurs, upon return contains an NSError object describing the error.
+ @return A dictionary with keys "loaderType" and "versionString", or nil if reading fails.
  */
-+ (nullable NSDictionary *)readInstallerInfoFromModpackDirectory:(NSString *)modpackDirectory
++ (nullable NSDictionary *)readInstallerInfoFromModpackDirectory:(NSString *)modpackDir
                                                           error:(NSError **)error;
 
 /**
- Performs the modloader installation process by reading the installer file and then
- initiating the download and install process based on the loader type. For Forge,
- it downloads and launches the installer jar; for Fabric, it automatically selects
- the appropriate loader version and installs without UI.
+ Removes the installer file from the modpack directory.
  
- This method calls the completion block when the installation process has finished.
- 
- @param modpackDirectory The path to the modpack directory.
- @param vc The view controller from which to present any necessary UI.
- @param completion A block invoked when the installation is complete, with a BOOL indicating success.
+ @param modpackDir The modpack directory.
  */
-+ (void)performModloaderInstallationForModpackDirectory:(NSString *)modpackDirectory
-                                   fromViewController:(UIViewController *)vc
-                                           completion:(void(^)(BOOL success))completion;
++ (void)removeInstallerFileFromModpackDirectory:(NSString *)modpackDir;
+
+/**
+ Performs the modloader installation for the modpack directory. This method will
+ automatically install the modloader (Forge or Fabric) as a separate profile.
+ 
+ @param modpackDir The modpack directory.
+ @param vc The view controller from which to present any required UI.
+ @param completion A block that is called when installation is finished, with a BOOL success flag.
+ */
++ (void)performModloaderInstallationForModpackDirectory:(NSString *)modpackDir
+                                     fromViewController:(UIViewController *)vc
+                                             completion:(void (^)(BOOL success))completion;
 
 @end
 
