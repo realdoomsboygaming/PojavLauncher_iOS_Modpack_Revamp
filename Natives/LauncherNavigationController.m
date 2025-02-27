@@ -17,16 +17,17 @@
 #import "UIKit+hook.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#import "installer/modpack/ModloaderInstaller.h"
-#include <sys/time.h>
+#import "installer/modpack/ModloaderInstaller.h"  // New import for modloader support
+#import <sys/time.h>
+
+#define AUTORESIZE_MASKS (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin)
+
+static void *ProgressObserverContext = &ProgressObserverContext;
 
 NSMutableArray<NSDictionary *> *localVersionList = nil;
 NSMutableArray<NSDictionary *> *remoteVersionList = nil;
 
-#define AUTORESIZE_MASKS (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin)
-static void *ProgressObserverContext = &ProgressObserverContext;
-
-@interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
+@interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
 @property (nonatomic, strong) MinecraftResourceDownloadTask *task;
 @property (nonatomic, strong) DownloadProgressViewController *progressVC;
 @property (nonatomic, strong) PLPickerView *versionPickerView;
@@ -57,7 +58,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.versionPickerView = [[PLPickerView alloc] init];
     self.versionPickerView.delegate = self;
     self.versionPickerView.dataSource = self;
-    UIToolbar *versionPickToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, 44.0)];
+    UIToolbar *versionPickToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.frame.size.width, 44.0)];
     
     [self reloadProfileList];
     
@@ -67,12 +68,13 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.versionTextField.inputAccessoryView = versionPickToolbar;
     self.versionTextField.inputView = self.versionPickerView;
     
-    [self.toolbar addSubview:self.versionTextField];
+    UIView *targetToolbar = self.toolbar;
+    [targetToolbar addSubview:self.versionTextField];
     
     self.progressViewMain = [[UIProgressView alloc] initWithFrame:CGRectMake(0, 0, self.toolbar.frame.size.width, 4)];
     self.progressViewMain.autoresizingMask = AUTORESIZE_MASKS;
     self.progressViewMain.hidden = YES;
-    [self.toolbar addSubview:self.progressViewMain];
+    [targetToolbar addSubview:self.progressViewMain];
     
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     setButtonPointerInteraction(self.buttonInstall);
@@ -84,7 +86,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.buttonInstall.tintColor = [UIColor whiteColor];
     self.buttonInstall.enabled = NO;
     [self.buttonInstall addTarget:self action:@selector(performInstallOrShowDetails:) forControlEvents:UIControlEventPrimaryActionTriggered];
-    [self.toolbar addSubview:self.buttonInstall];
+    [targetToolbar addSubview:self.buttonInstall];
     
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
     self.progressText.adjustsFontSizeToFitWidth = YES;
@@ -92,7 +94,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressText.font = [self.progressText.font fontWithSize:16];
     self.progressText.textAlignment = NSTextAlignmentCenter;
     self.progressText.userInteractionEnabled = NO;
-    [self.toolbar addSubview:self.progressText];
+    [targetToolbar addSubview:self.progressText];
     
     [self fetchRemoteVersionList];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(receiveNotification:) name:@"InstallModpack" object:nil];
@@ -165,13 +167,19 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)enterCustomControls {
     CustomControlsViewController *vc = [[CustomControlsViewController alloc] init];
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    vc.setDefaultCtrl = ^(NSString *name) { setPrefObject(@"control.default_ctrl", name); };
-    vc.getDefaultCtrl = ^{ return getPrefObject(@"control.default_ctrl"); };
+    vc.setDefaultCtrl = ^(NSString *name) {
+        setPrefObject(@"control.default_ctrl", name);
+    };
+    vc.getDefaultCtrl = ^{
+        return getPrefObject(@"control.default_ctrl");
+    };
     [self presentViewController:vc animated:YES completion:nil];
 }
 
 - (void)enterModInstaller {
-    UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]] asCopy:YES];
+    UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc]
+                                                        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
+                                                        asCopy:YES];
     documentPicker.delegate = self;
     documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
     [self presentViewController:documentPicker animated:YES completion:nil];
@@ -181,7 +189,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
     vc.filepath = path;
     vc.hitEnterAfterWindowShown = hitEnter;
-    if (!vc.requiredJavaVersion) return;
+    if (!vc.requiredJavaVersion) {
+        return;
+    }
     [self invokeAfterJITEnabled:^{
         vc.modalPresentationStyle = UIModalPresentationFullScreen;
         NSLog(@"[ModInstaller] Launching %@", vc.filepath);
@@ -269,7 +279,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
     
     self.task = [MinecraftResourceDownloadTask new];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __weak LauncherNavigationController *weakSelf = self;
         self.task.handleError = ^{
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -344,7 +354,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self setInteractionEnabled:NO forDownloading:YES];
     self.task = [MinecraftResourceDownloadTask new];
     NSDictionary *userInfo = notification.userInfo;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __weak LauncherNavigationController *weakSelf = self;
         self.task.handleError = ^{
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -382,6 +392,30 @@ static void *ProgressObserverContext = &ProgressObserverContext;
                                                                    message:hasJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - UIPickerViewDataSource
+
+- (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView {
+    // Assuming a single-column picker
+    return 1;
+}
+
+- (NSInteger)pickerView:(UIPickerView *)pickerView numberOfRowsInComponent:(NSInteger)component {
+    return localVersionList.count;
+}
+
+#pragma mark - UIPickerViewDelegate
+
+- (NSString *)pickerView:(UIPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component {
+    NSDictionary *profile = localVersionList[row];
+    return profile[@"id"];
+}
+
+- (void)pickerView:(UIPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
+    self.profileSelectedAt = (int)row;
+    NSDictionary *profile = localVersionList[row];
+    self.versionTextField.text = profile[@"id"];
 }
 
 @end
