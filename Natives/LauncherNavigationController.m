@@ -20,6 +20,9 @@
 #import "installer/modpack/ModloaderInstaller.h"
 #include <sys/time.h>
 
+NSMutableArray<NSDictionary *> *localVersionList = nil;
+NSMutableArray<NSDictionary *> *remoteVersionList = nil;
+
 #define AUTORESIZE_MASKS (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin)
 static void *ProgressObserverContext = &ProgressObserverContext;
 
