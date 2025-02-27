@@ -5,7 +5,7 @@
 #import "ModpackUtils.h"
 #import "UnzipKit.h"
 #import "AFNetworking.h"
-#import "ModloaderInstaller.h"  // New import
+#import "ModloaderInstaller.h"  // New import :contentReference[oaicite:0]{index=0}
 
 static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSError *error = nil;
