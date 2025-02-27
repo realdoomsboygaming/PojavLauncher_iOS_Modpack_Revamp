@@ -167,7 +167,7 @@ NSMutableArray<NSDictionary *> *remoteVersionList = nil;
 - (void)enterCustomControls {
     CustomControlsViewController *vc = [[CustomControlsViewController alloc] init];
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    vc.setDefaultCtrl = ^(NSString *name) {
+    vc.setDefaultCtrl = ^(NSString *name){
         setPrefObject(@"control.default_ctrl", name);
     };
     vc.getDefaultCtrl = ^{
@@ -416,6 +416,13 @@ NSMutableArray<NSDictionary *> *remoteVersionList = nil;
     self.profileSelectedAt = (int)row;
     NSDictionary *profile = localVersionList[row];
     self.versionTextField.text = profile[@"id"];
+}
+
+#pragma mark - PLPickerViewDelegate
+
+- (void)pickerView:(PLPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
+    // Provide any custom configuration for the image view if needed.
+    // Default implementation: do nothing.
 }
 
 @end
