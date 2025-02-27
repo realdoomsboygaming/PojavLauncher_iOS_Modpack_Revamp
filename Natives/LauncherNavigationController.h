@@ -1,15 +1,12 @@
 #import <UIKit/UIKit.h>
 
-NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
+extern NSMutableArray<NSDictionary *> *localVersionList, *remoteVersionList;
 
 @interface LauncherNavigationController : UINavigationController
-
-@property(nonatomic) UIProgressView *progressViewMain, *progressViewSub;
-@property(nonatomic) UILabel* progressText;
-@property(nonatomic) UIButton* buttonInstall;
-
+@property (nonatomic, strong) UIProgressView *progressViewMain, *progressViewSub;
+@property (nonatomic, strong) UILabel *progressText;
+@property (nonatomic, strong) UIButton *buttonInstall;
 - (void)enterModInstallerWithPath:(NSString *)path hitEnterAfterWindowShown:(BOOL)hitEnter;
 - (void)fetchLocalVersionList;
 - (void)setInteractionEnabled:(BOOL)enable forDownloading:(BOOL)downloading;
-
 @end
