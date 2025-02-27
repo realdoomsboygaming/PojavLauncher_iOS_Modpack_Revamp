@@ -8,7 +8,7 @@
 #import "PLProfiles.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
-#import "ModloaderInstaller.h"  // For modloader installer file parsing
+#import "modpack/ModloaderInstaller.h"  // For modloader installer file parsing
 #import <objc/runtime.h>  // :contentReference[oaicite:3]{index=3}
 
 @interface FabricInstallViewController ()
