@@ -24,21 +24,17 @@
 
 static void *ProgressObserverContext = &ProgressObserverContext;
 
-@interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate> {
-}
-
-@property(nonatomic) MinecraftResourceDownloadTask* task;
-@property(nonatomic) DownloadProgressViewController* progressVC;
-@property(nonatomic) PLPickerView* versionPickerView;
-@property(nonatomic) UITextField* versionTextField;
-@property(nonatomic) int profileSelectedAt;
-
+@interface LauncherNavigationController () <UIDocumentPickerDelegate, UIPickerViewDataSource, PLPickerViewDelegate, UIPopoverPresentationControllerDelegate>
+@property (nonatomic, strong) MinecraftResourceDownloadTask *task;
+@property (nonatomic, strong) DownloadProgressViewController *progressVC;
+@property (nonatomic, strong) PLPickerView *versionPickerView;
+@property (nonatomic, strong) UITextField *versionTextField;
+@property (nonatomic) int profileSelectedAt;
 @end
 
 @implementation LauncherNavigationController
 
-- (void)viewDidLoad
-{
+- (void)viewDidLoad {
     [super viewDidLoad];
 
     if ([self respondsToSelector:@selector(setNeedsUpdateOfScreenEdgesDeferringSystemGestures)]) {
@@ -98,15 +94,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [targetToolbar addSubview:self.progressText];
 
     [self fetchRemoteVersionList];
-    [NSNotificationCenter.defaultCenter addObserver:self
-        selector:@selector(receiveNotification:) 
-        name:@"InstallModpack"
-        object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(receiveNotification:) name:@"InstallModpack" object:nil];
 
     if ([BaseAuthenticator.current isKindOfClass:MicrosoftAuthenticator.class]) {
-        // Perform token refreshment on startup
         [self setInteractionEnabled:NO forDownloading:NO];
-        id callback = ^(NSString* status, BOOL success) {
+        id callback = ^(NSString *status, BOOL success) {
             self.progressText.text = status;
             if (status == nil) {
                 [self setInteractionEnabled:YES forDownloading:NO];
@@ -151,7 +143,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     ].mutableCopy;
 
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    [manager GET:@"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" parameters:nil headers:nil progress:^(NSProgress * _Nonnull progress) {
+    [manager GET:@"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" parameters:nil headers:nil progress:^(NSProgress *progress) {
         self.progressViewMain.progress = progress.fractionCompleted;
     } success:^(NSURLSessionTask *task, NSDictionary *responseObject) {
         [remoteVersionList addObjectsFromArray:responseObject[@"versions"]];
@@ -164,21 +156,14 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }];
 }
 
-// Invoked by: startup, instance change event
 - (void)reloadProfileList {
-    // Reload local version list
     [self fetchLocalVersionList];
-    // Reload launcher_profiles.json
     [PLProfiles updateCurrent];
     [self.versionPickerView reloadAllComponents];
-    // Reload selected profile info
     self.profileSelectedAt = [PLProfiles.current.profiles.allKeys indexOfObject:PLProfiles.current.selectedProfileName];
-    if (self.profileSelectedAt == -1) {
-        // This instance has no profiles?
-        return;
-    }
+    if (self.profileSelectedAt == -1) return;
     [self.versionPickerView selectRow:self.profileSelectedAt inComponent:0 animated:NO];
-    [self pickerView:self.versionPickerView didSelectRow:self.profileSelectedAt inComponent:0];
+    [self pickerView:self.versionPickerView didSelectRow:self.versionPickerView.selectedRowInComponent:0 inComponent:0];
 }
 
 #pragma mark - Options
@@ -195,9 +180,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 - (void)enterModInstaller {
-    UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc]
-        initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]]
-        asCopy:YES];
+    UIDocumentPickerViewController *documentPicker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[[UTType typeWithMIMEType:@"application/java-archive"]] asCopy:YES];
     documentPicker.delegate = self;
     documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
     [self presentViewController:documentPicker animated:YES completion:nil];
@@ -207,9 +190,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     JavaGUIViewController *vc = [[JavaGUIViewController alloc] init];
     vc.filepath = path;
     vc.hitEnterAfterWindowShown = hitEnter;
-    if (!vc.requiredJavaVersion) {
-        return;
-    }
+    if (!vc.requiredJavaVersion) return;
     [self invokeAfterJITEnabled:^{
         vc.modalPresentationStyle = UIModalPresentationFullScreen;
         NSLog(@"[ModInstaller] launching %@", vc.filepath);
@@ -243,26 +224,17 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self.versionTextField becomeFirstResponder];
         return;
     }
-
     if (BaseAuthenticator.current == nil) {
-        // Present the account selector if none selected
-        UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0]
-        viewControllers][0];
+        UIViewController *view = [(UINavigationController *)self.splitViewController.viewControllers[0] viewControllers][0];
         [view performSelector:@selector(selectAccount:) withObject:sender];
         return;
     }
-
     [self setInteractionEnabled:NO forDownloading:YES];
-
     NSString *versionId = PLProfiles.current.profiles[self.versionTextField.text][@"lastVersionId"];
-    NSDictionary *object = [remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(id == %@)", versionId]].firstObject;
+    NSDictionary *object = [[remoteVersionList filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(id == %@)", versionId]] firstObject];
     if (!object) {
-        object = @{
-            @"id": versionId,
-            @"type": @"custom"
-        };
+        object = @{@"id": versionId, @"type": @"custom"};
     }
-
     self.task = [MinecraftResourceDownloadTask new];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __weak LauncherNavigationController *weakSelf = self;
@@ -276,10 +248,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self.task downloadVersion:object];
         dispatch_async(dispatch_get_main_queue(), ^{
             self.progressViewMain.observedProgress = self.task.progress;
-            [self.task.progress addObserver:self
-                forKeyPath:@"fractionCompleted"
-                options:NSKeyValueObservingOptionInitial
-                context:ProgressObserverContext];
+            [self.task.progress addObserver:self forKeyPath:@"fractionCompleted" options:NSKeyValueObservingOptionInitial context:ProgressObserverContext];
         });
     });
 }
@@ -295,7 +264,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self presentViewController:nav animated:YES completion:nil];
     } else {
         [self launchMinecraft:sender];
-    } 
+    }
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
@@ -303,8 +272,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
         return;
     }
-
-    // Calculate download speed and ETA
     static CGFloat lastMsTime;
     static NSUInteger lastSecTime, lastCompletedUnitCount;
     NSProgress *progress = self.task.textProgress;
@@ -321,13 +288,10 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         lastSecTime = tv.tv_sec;
         lastMsTime = currentTime;
     }
-
     dispatch_async(dispatch_get_main_queue(), ^{
         self.progressText.text = progress.localizedAdditionalDescription;
-
         if (!progress.finished) return;
         [self.progressVC dismissModalViewControllerAnimated:NO];
-
         self.progressViewMain.observedProgress = nil;
         if (self.task.metadata) {
             [self invokeAfterJITEnabled:^{
@@ -342,9 +306,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 }
 
 - (void)receiveNotification:(NSNotification *)notification {
-    if (![notification.name isEqualToString:@"InstallModpack"]) {
-        return;
-    }
+    if (![notification.name isEqualToString:@"InstallModpack"]) return;
     [self setInteractionEnabled:NO forDownloading:YES];
     self.task = [MinecraftResourceDownloadTask new];
     NSDictionary *userInfo = notification.userInfo;
@@ -360,10 +322,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         [self.task downloadModpackFromAPI:notification.object detail:userInfo[@"detail"] atIndex:[userInfo[@"index"] unsignedLongValue]];
         dispatch_async(dispatch_get_main_queue(), ^{
             self.progressViewMain.observedProgress = self.task.progress;
-            [self.task.progress addObserver:self
-                forKeyPath:@"fractionCompleted"
-                options:NSKeyValueObservingOptionInitial
-                context:ProgressObserverContext];
+            [self.task.progress addObserver:self forKeyPath:@"fractionCompleted" options:NSKeyValueObservingOptionInitial context:ProgressObserverContext];
         });
     });
 }
@@ -371,7 +330,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 - (void)invokeAfterJITEnabled:(void(^)(void))handler {
     localVersionList = remoteVersionList = nil;
     BOOL hasTrollStoreJIT = getEntitlementValue(@"com.apple.private.local.sandboxed-jit");
-
     if (isJITEnabled(false)) {
         [ALTServerManager.sharedManager stopDiscovering];
         handler();
@@ -379,29 +337,18 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     } else if (hasTrollStoreJIT) {
         NSURL *jitURL = [NSURL URLWithString:[NSString stringWithFormat:@"apple-magnifier://enable-jit?bundle-id=%@", NSBundle.mainBundle.bundleIdentifier]];
         [UIApplication.sharedApplication openURL:jitURL options:@{} completionHandler:nil];
-        // Do not return, wait for TrollStore to enable JIT and jump back
     } else if (getPrefBool(@"debug.debug_skip_wait_jit")) {
         NSLog(@"Debug option skipped waiting for JIT. Java might not work.");
         handler();
         return;
     }
-
     self.progressText.text = localize(@"launcher.wait_jit.title", nil);
-
-    UIAlertController* alert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
         message:hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
         preferredStyle:UIAlertControllerStyleAlert];
-/* TODO:
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:^{
-        
-    }];
-    [alert addAction:cancel];
-*/
     [self presentViewController:alert animated:YES completion:nil];
-
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (!isJITEnabled(false)) {
-            // Perform check for every 200ms
             usleep(1000*200);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -415,10 +362,9 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return UIModalPresentationNone;
 }
 
-#pragma mark - UIPickerView stuff
+#pragma mark - UIPickerView / PLPickerView Delegate & DataSource
 - (void)pickerView:(PLPickerView *)pickerView didSelectRow:(NSInteger)row inComponent:(NSInteger)component {
     self.profileSelectedAt = row;
-    //((UIImageView *)self.versionTextField.leftView).image = [pickerView imageAtRow:row column:component];
     ((UIImageView *)self.versionTextField.leftView).image = [pickerView imageAtRow:row column:component];
     self.versionTextField.text = [self pickerView:pickerView titleForRow:row forComponent:component];
     PLProfiles.current.selectedProfileName = self.versionTextField.text;
@@ -436,7 +382,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return PLProfiles.current.profiles.allValues[row][@"name"];
 }
 
-- (void)pickerView:(UIPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
+// New method to display profile icons in the file list viewer
+- (void)pickerView:(PLPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
     UIImage *fallbackImage = [[UIImage imageNamed:@"DefaultProfile"] _imageWithSize:CGSizeMake(40, 40)];
     NSString *urlString = PLProfiles.current.profiles.allValues[row][@"icon"];
     [imageView setImageWithURL:[NSURL URLWithString:urlString] placeholderImage:fallbackImage];
@@ -447,8 +394,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self pickerView:self.versionPickerView didSelectRow:[self.versionPickerView selectedRowInComponent:0] inComponent:0];
 }
 
-#pragma mark - View controller UI mode
-
+#pragma mark - View Controller UI Mode
 - (BOOL)prefersHomeIndicatorAutoHidden {
     return YES;
 }
