@@ -46,7 +46,7 @@
 }
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"project/%@/version", item[@"id"]] params:nil];
+    NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"project/%@/version", item[@"id"]] params:@{}];
     if (!response) {
         return;
     }
