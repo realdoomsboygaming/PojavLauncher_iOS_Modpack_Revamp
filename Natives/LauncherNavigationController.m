@@ -128,10 +128,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     NSArray *list = [fileManager contentsOfDirectoryAtPath:versionPath error:Nil];
     for (NSString *versionId in list) {
         if (![self isVersionInstalled:versionId]) continue;
-        [localVersionList addObject:@{
-            @"id": versionId,
-            @"type": @"custom"
-        }];
+        [localVersionList addObject:@{ @"id": versionId, @"type": @"custom" }];
     }
 }
 
@@ -163,7 +160,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.profileSelectedAt = [PLProfiles.current.profiles.allKeys indexOfObject:PLProfiles.current.selectedProfileName];
     if (self.profileSelectedAt == -1) return;
     [self.versionPickerView selectRow:self.profileSelectedAt inComponent:0 animated:NO];
-    [self pickerView:self.versionPickerView didSelectRow:self.versionPickerView.selectedRowInComponent:0 inComponent:0];
+    NSInteger selectedRow = [self.versionPickerView selectedRowInComponent:0];
+    [self pickerView:self.versionPickerView didSelectRow:selectedRow inComponent:0];
 }
 
 #pragma mark - Options
@@ -291,7 +289,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     dispatch_async(dispatch_get_main_queue(), ^{
         self.progressText.text = progress.localizedAdditionalDescription;
         if (!progress.finished) return;
-        [self.progressVC dismissModalViewControllerAnimated:NO];
+        [self.progressVC dismissViewControllerAnimated:NO completion:nil];
         self.progressViewMain.observedProgress = nil;
         if (self.task.metadata) {
             [self invokeAfterJITEnabled:^{
@@ -344,8 +342,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     }
     self.progressText.text = localize(@"launcher.wait_jit.title", nil);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:localize(@"launcher.wait_jit.title", nil)
-        message:hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
-        preferredStyle:UIAlertControllerStyleAlert];
+                                                                     message:hasTrollStoreJIT ? localize(@"launcher.wait_jit_trollstore.message", nil) : localize(@"launcher.wait_jit.message", nil)
+                                                              preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:alert animated:YES completion:nil];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (!isJITEnabled(false)) {
@@ -382,7 +380,6 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     return PLProfiles.current.profiles.allValues[row][@"name"];
 }
 
-// New method to display profile icons in the file list viewer
 - (void)pickerView:(PLPickerView *)pickerView enumerateImageView:(UIImageView *)imageView forRow:(NSInteger)row forComponent:(NSInteger)component {
     UIImage *fallbackImage = [[UIImage imageNamed:@"DefaultProfile"] _imageWithSize:CGSizeMake(40, 40)];
     NSString *urlString = PLProfiles.current.profiles.allValues[row][@"icon"];
@@ -391,7 +388,8 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)versionClosePicker {
     [self.versionTextField endEditing:YES];
-    [self pickerView:self.versionPickerView didSelectRow:[self.versionPickerView selectedRowInComponent:0] inComponent:0];
+    NSInteger selectedRow = [self.versionPickerView selectedRowInComponent:0];
+    [self pickerView:self.versionPickerView didSelectRow:selectedRow inComponent:0];
 }
 
 #pragma mark - View Controller UI Mode
