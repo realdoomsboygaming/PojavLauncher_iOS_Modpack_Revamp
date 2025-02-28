@@ -36,11 +36,11 @@ static void *ProgressObserverContext = &ProgressObserverContext;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-
+    
     if ([self respondsToSelector:@selector(setNeedsUpdateOfScreenEdgesDeferringSystemGestures)]) {
         [self setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
     }
-
+    
     self.versionTextField = [[PickTextField alloc] initWithFrame:CGRectMake(4, 4, self.toolbar.frame.size.width * 0.8 - 8, self.toolbar.frame.size.height - 8)];
     [self.versionTextField addTarget:self.versionTextField action:@selector(resignFirstResponder) forControlEvents:UIControlEventEditingDidEndOnExit];
     self.versionTextField.autoresizingMask = AUTORESIZE_MASKS;
@@ -51,28 +51,28 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.versionTextField.leftViewMode = UITextFieldViewModeAlways;
     self.versionTextField.rightViewMode = UITextFieldViewModeAlways;
     self.versionTextField.textAlignment = NSTextAlignmentCenter;
-
+    
     self.versionPickerView = [[PLPickerView alloc] init];
     self.versionPickerView.delegate = self;
     self.versionPickerView.dataSource = self;
     UIToolbar *versionPickToolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0.0, 0.0, self.view.frame.size.width, 44.0)];
-
+    
     [self reloadProfileList];
-
+    
     UIBarButtonItem *versionFlexibleSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:self action:nil];
     UIBarButtonItem *versionDoneButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(versionClosePicker)];
     versionPickToolbar.items = @[versionFlexibleSpace, versionDoneButton];
     self.versionTextField.inputAccessoryView = versionPickToolbar;
     self.versionTextField.inputView = self.versionPickerView;
-
+    
     UIView *targetToolbar = self.toolbar;
     [targetToolbar addSubview:self.versionTextField];
-
+    
     self.progressViewMain = [[UIProgressView alloc] initWithFrame:CGRectMake(0, 0, self.toolbar.frame.size.width, 4)];
     self.progressViewMain.autoresizingMask = AUTORESIZE_MASKS;
     self.progressViewMain.hidden = YES;
     [targetToolbar addSubview:self.progressViewMain];
-
+    
     self.buttonInstall = [UIButton buttonWithType:UIButtonTypeSystem];
     setButtonPointerInteraction(self.buttonInstall);
     [self.buttonInstall setTitle:localize(@"Play", nil) forState:UIControlStateNormal];
@@ -84,7 +84,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.buttonInstall.enabled = NO;
     [self.buttonInstall addTarget:self action:@selector(performInstallOrShowDetails:) forControlEvents:UIControlEventPrimaryActionTriggered];
     [targetToolbar addSubview:self.buttonInstall];
-
+    
     self.progressText = [[UILabel alloc] initWithFrame:self.versionTextField.frame];
     self.progressText.adjustsFontSizeToFitWidth = YES;
     self.progressText.autoresizingMask = AUTORESIZE_MASKS;
@@ -92,10 +92,10 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     self.progressText.textAlignment = NSTextAlignmentCenter;
     self.progressText.userInteractionEnabled = NO;
     [targetToolbar addSubview:self.progressText];
-
+    
     [self fetchRemoteVersionList];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(receiveNotification:) name:@"InstallModpack" object:nil];
-
+    
     if ([BaseAuthenticator.current isKindOfClass:MicrosoftAuthenticator.class]) {
         [self setInteractionEnabled:NO forDownloading:NO];
         id callback = ^(NSString *status, BOOL success) {
@@ -122,7 +122,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         localVersionList = [NSMutableArray new];
     }
     [localVersionList removeAllObjects];
-
+    
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *versionPath = [NSString stringWithFormat:@"%s/versions/", getenv("POJAV_GAME_DIR")];
     NSArray *list = [fileManager contentsOfDirectoryAtPath:versionPath error:Nil];
@@ -138,7 +138,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         @{@"id": @"latest-release", @"type": @"release"},
         @{@"id": @"latest-snapshot", @"type": @"snapshot"}
     ].mutableCopy;
-
+    
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
     [manager GET:@"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json" parameters:nil headers:nil progress:^(NSProgress *progress) {
         self.progressViewMain.progress = progress.fractionCompleted;
@@ -274,7 +274,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     static NSUInteger lastSecTime, lastCompletedUnitCount;
     NSProgress *progress = self.task.textProgress;
     struct timeval tv;
-    gettimeofday(&tv, NULL); 
+    gettimeofday(&tv, NULL);
     NSInteger completedUnitCount = self.task.progress.totalUnitCount * self.task.progress.fractionCompleted;
     progress.completedUnitCount = completedUnitCount;
     if (lastSecTime < tv.tv_sec) {
@@ -286,9 +286,18 @@ static void *ProgressObserverContext = &ProgressObserverContext;
         lastSecTime = tv.tv_sec;
         lastMsTime = currentTime;
     }
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         self.progressText.text = progress.localizedAdditionalDescription;
+        
         if (!progress.finished) return;
+        
+        // When finished, replace spinner with native iOS checkmark and display total downloaded size.
+        CGFloat totalMB = self.task.progress.totalUnitCount / (1024.0 * 1024.0);
+        self.progressText.text = [NSString stringWithFormat:@"Downloaded %.2f MB ✓", totalMB];
+        UIImageView *rightView = (UIImageView *)self.versionTextField.rightView;
+        rightView.image = [UIImage systemImageNamed:@"checkmark"];
+        
         [self.progressVC dismissViewControllerAnimated:NO completion:nil];
         self.progressViewMain.observedProgress = nil;
         if (self.task.metadata) {
@@ -347,7 +356,7 @@ static void *ProgressObserverContext = &ProgressObserverContext;
     [self presentViewController:alert animated:YES completion:nil];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (!isJITEnabled(false)) {
-            usleep(1000*200);
+            usleep(1000 * 200);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             [alert dismissViewControllerAnimated:YES completion:handler];
