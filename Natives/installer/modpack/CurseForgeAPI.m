@@ -4,6 +4,9 @@
 #import "MinecraftResourceDownloadTask.h"
 #import "PLProfiles.h"
 
+#define kCurseForgeGameIDMinecraft 432
+#define kCurseForgeClassIDModpack 4471
+
 @implementation CurseForgeAPI
 
 - (instancetype)init {
@@ -11,7 +14,6 @@
     return self;
 }
 
-// Override getEndpoint to include CurseForge API key
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params {
     __block id result;
     dispatch_group_t group = dispatch_group_create();
@@ -66,7 +68,7 @@
 
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
     NSString *endpoint = [NSString stringWithFormat:@"v1/mods/%@/files", item[@"id"]];
-    NSDictionary *response = [self getEndpoint:endpoint params:nil];
+    NSDictionary *response = [self getEndpoint:endpoint params:@{}];
     if (!response) {
         return;
     }
