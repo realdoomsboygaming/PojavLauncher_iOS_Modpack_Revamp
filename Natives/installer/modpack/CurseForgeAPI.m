@@ -5,7 +5,6 @@
 #import "ModpackUtils.h"
 #import "UnzipKit.h"
 #import "AFNetworking.h"
-#import "ModloaderInstaller.h"  // New import
 
 static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
     NSError *error = nil;
@@ -286,13 +285,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
                         [PLProfiles.current save];
                     });
                 }
-                // --- New: Write the mod loader installer file ---
-                NSError *installerError = nil;
-                BOOL installerCreated = [ModloaderInstaller createInstallerFileInModpackDirectory:destPath withVersionString:finalVersionString loaderType:modLoaderId error:&installerError];
-                if (!installerCreated) {
-                    NSLog(@"[ModloaderInstaller] Failed to create installer file: %@", installerError.localizedDescription);
-                }
-                // --- End new installer file code ---
                 NSArray *allFiles = manifestDict[@"files"];
                 NSMutableArray *files = [NSMutableArray new];
                 NSMutableSet *uniqueKeys = [NSMutableSet new];
