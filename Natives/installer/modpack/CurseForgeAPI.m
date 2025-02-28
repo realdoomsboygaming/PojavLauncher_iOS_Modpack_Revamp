@@ -191,8 +191,6 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
 
 - (void)downloader:(MinecraftResourceDownloadTask *)downloader submitDownloadTasksFromPackage:(NSString *)packagePath toPath:(NSString *)destPath {
     __weak typeof(self) weakSelf = self;
-    
-    // Replace deprecated extraction method with UZKArchive extraction.
     NSError *extractError = nil;
     UZKArchive *archive = [[UZKArchive alloc] initWithPath:packagePath error:&extractError];
     if (extractError) {
@@ -201,7 +199,36 @@ static NSError *saveJSONToFile(NSDictionary *jsonDict, NSString *filePath) {
         });
         return;
     }
-    BOOL extractionSuccess = [archive extractFilesToDestination:destPath error:&extractError];
+    // Custom extraction using performOnFilesInArchive:
+    __block BOOL extractionSuccess = YES;
+    [archive performOnFilesInArchive:^(UZKFileInfo *fileInfo, BOOL *stop) {
+        NSString *destItemPath = [destPath stringByAppendingPathComponent:fileInfo.filename];
+        if (fileInfo.isDirectory) {
+            NSError *dirError = nil;
+            BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:destItemPath withIntermediateDirectories:YES attributes:nil error:&dirError];
+            if (!created || dirError) {
+                NSLog(@"Extraction error for directory %@: %@", destItemPath, dirError);
+                *stop = YES;
+                extractionSuccess = NO;
+            }
+        } else {
+            NSError *fileError = nil;
+            NSData *data = [archive extractData:fileInfo error:&fileError];
+            if (!data || fileError) {
+                NSLog(@"Extraction error for file %@: %@", fileInfo.filename, fileError);
+                *stop = YES;
+                extractionSuccess = NO;
+            } else {
+                BOOL written = [data writeToFile:destItemPath options:NSDataWritingAtomic error:&fileError];
+                if (!written || fileError) {
+                    NSLog(@"Write error for file %@: %@", destItemPath, fileError);
+                    *stop = YES;
+                    extractionSuccess = NO;
+                }
+            }
+        }
+    } error:&extractError];
+    
     if (!extractionSuccess || extractError) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [downloader finishDownloadWithErrorString:[NSString stringWithFormat:@"Extraction failed: %@", extractError.localizedDescription]];
