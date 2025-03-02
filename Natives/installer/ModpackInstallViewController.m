@@ -14,20 +14,6 @@
 #import "modpack/ModpackUtils.h"
 #include <dlfcn.h>
 
-#import "AFNetworking.h"
-#import "LauncherNavigationController.h"
-#import "ModpackInstallViewController.h"
-#import "UIKit+AFNetworking.h"
-#import "UIKit+hook.h"
-#import "WFWorkflowProgressView.h"
-#import "ModrinthAPI.h"
-#import "config.h"
-#import "ios_uikit_bridge.h"
-#import "utils.h"
-#import "PLProfiles.h"
-#import "ModpackUtils.h"
-#include <dlfcn.h>
-
 // Inline helper to display alerts.
 static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
