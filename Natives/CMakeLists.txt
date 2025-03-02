@@ -129,6 +129,7 @@ add_executable(PojavLauncher
   installer/FabricInstallViewController.m
   installer/ForgeInstallViewController.m
   installer/ModpackInstallViewController.m
+  installer/ModMenuViewController.m
   installer/FabricUtils.m
   installer/modpack/ModpackUtils.m
   installer/modpack/ModpackAPI.m
