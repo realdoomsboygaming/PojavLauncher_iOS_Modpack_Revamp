@@ -18,4 +18,7 @@
 
 - (id)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params;
 
+// NEW: Asynchronous variant to prevent blocking.
+- (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id result, NSError *error))completion;
+
 @end
