@@ -14,6 +14,23 @@
 #import "modpack/ModpackUtils.h"
 #include <dlfcn.h>
 
+// Inline helper to display alerts.
+static inline void showDialog(NSString *title, NSString *message) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil)
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    UIWindow *window = nil;
+    if (@available(iOS 13.0, *)) {
+         window = [UIApplication sharedApplication].windows.firstObject;
+    } else {
+         window = [UIApplication sharedApplication].keyWindow;
+    }
+    [window.rootViewController presentViewController:alert animated:YES completion:nil];
+}
+
 @interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UISegmentedControl *sourceSegmentedControl;
@@ -288,4 +305,3 @@
 }
 
 @end
-
