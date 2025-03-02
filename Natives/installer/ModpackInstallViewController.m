@@ -10,7 +10,7 @@
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "PLProfiles.h"
-#import "ModpackUtils.h"
+#import "modpack/ModpackUtils.h"
 #include <dlfcn.h>
 
 @interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
