@@ -27,6 +27,7 @@
     };
     NSDictionary *response = [self getEndpoint:@"search" params:params];
     if (!response) {
+        NSLog(@"ModrinthAPI.searchModWithFilters: No response returned");
         return nil;
     }
     NSMutableArray *result = modrinthSearchResult ?: [NSMutableArray new];
@@ -48,6 +49,7 @@
 - (void)loadDetailsOfModSync:(NSMutableDictionary *)item {
     NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"project/%@/version", item[@"id"]] params:@{}];
     if (!response) {
+        NSLog(@"loadDetailsOfModSync: No response for mod id %@", item[@"id"]);
         return;
     }
     NSArray<NSString *> *names = [response valueForKey:@"name"];
@@ -75,7 +77,13 @@
     NSString *endpoint = [NSString stringWithFormat:@"project/%@/version", item[@"id"]];
     [self getEndpoint:endpoint params:@{} completion:^(id response, NSError *error) {
         if (!response) {
+            NSLog(@"loadDetailsOfMod: No response for mod id %@, error: %@", item[@"id"], error);
             if (completion) completion(error);
+            return;
+        }
+        if (![response isKindOfClass:[NSArray class]]) {
+            NSLog(@"loadDetailsOfMod: Unexpected response type: %@", [response class]);
+            if (completion) completion([NSError errorWithDomain:@"ModrinthAPIErrorDomain" code:0 userInfo:@{NSLocalizedDescriptionKey:@"Unexpected response format"}]);
             return;
         }
         NSArray *names = [response valueForKey:@"name"];
@@ -85,9 +93,13 @@
         NSMutableArray *sizes = [NSMutableArray new];
         [response enumerateObjectsUsingBlock:^(NSDictionary *version, NSUInteger i, BOOL *stop) {
             NSDictionary *file = [version[@"files"] firstObject];
-            [mcNames addObject:[version[@"game_versions"] firstObject]];
-            [sizes addObject:file[@"size"]];
-            [urls addObject:file[@"url"]];
+            if (!file) {
+                NSLog(@"loadDetailsOfMod: Missing file info for version %@", version);
+                return;
+            }
+            [mcNames addObject:[version[@"game_versions"] firstObject] ?: @"Unknown"];
+            [sizes addObject:file[@"size"] ?: @0];
+            [urls addObject:file[@"url"] ?: @""];
             NSDictionary *hashesMap = file[@"hashes"];
             [hashes addObject:hashesMap[@"sha1"] ?: [NSNull null]];
         }];
@@ -97,6 +109,7 @@
         item[@"versionUrls"] = urls;
         item[@"versionHashes"] = hashes;
         item[@"versionDetailsLoaded"] = @(YES);
+        NSLog(@"loadDetailsOfMod: Loaded %lu versions for mod %@", (unsigned long)names.count, item[@"id"]);
         if (completion) completion(nil);
     }];
 }
