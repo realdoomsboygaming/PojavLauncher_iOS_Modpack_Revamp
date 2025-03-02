@@ -1,6 +1,6 @@
 #import "ModMenuViewController.h"
-#import "modpack/ModrinthAPI.h"
-#import "modpack/CurseForgeAPI.h"
+#import "ModrinthAPI.h"
+#import "CurseForgeAPI.h"
 #import "config.h"
 #import "UIKit+AFNetworking.h"
 #import "utils.h"
@@ -127,15 +127,16 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     __block NSMutableDictionary *modMutable = [mod mutableCopy];
     if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self.modrinth loadDetailsOfMod:modMutable];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if ([modMutable[@"versionDetailsLoaded"] boolValue]) {
-                    [self.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
-                    [self showModDetails:modMutable atIndexPath:indexPath];
-                } else {
-                    presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
-                }
-            });
+            [self.modrinth loadDetailsOfMod:modMutable completion:^(NSError *error) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if ([modMutable[@"versionDetailsLoaded"] boolValue]) {
+                        [self.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
+                        [self showModDetails:modMutable atIndexPath:indexPath];
+                    } else {
+                        presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                    }
+                });
+            }];
         });
     } else {
         [self.curseForge loadDetailsOfMod:modMutable completion:^(NSError *error) {
@@ -150,26 +151,37 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         }];
     }
 }
+
 #pragma mark - Version Filtering and Dropdown
+
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
-    // Filter supported versions by checking that each version string contains its corresponding Minecraft version.
     NSArray *versionNames = mod[@"versionNames"];
     NSArray *mcVersionNames = mod[@"mcVersionNames"];
-    NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray new];
-    NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray new];
+    
+    NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
+    
+    // Filter supported versions by checking that the version string contains its corresponding Minecraft version.
+    NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
+    NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     for (NSUInteger i = 0; i < versionNames.count; i++) {
         NSString *version = versionNames[i];
         NSString *mcVersion = mcVersionNames[i];
-        // Consider version supported if it contains the mcVersion substring.
         if ([version rangeOfString:mcVersion].location != NSNotFound) {
             [supportedIndices addObject:@(i)];
             NSString *displayName = [version isEqualToString:mcVersion] ? version : [NSString stringWithFormat:@"%@ - %@", version, mcVersion];
             [supportedDisplayNames addObject:displayName];
         }
     }
+    
+    // If no supported versions found, fallback to all versions.
     if (supportedIndices.count == 0) {
-        presentAlertDialog(localize(@"Error", nil), @"No supported versions available.");
-        return;
+        NSLog(@"showModDetails: No supported versions found, falling back to all versions.");
+        supportedIndices = [NSMutableArray array];
+        supportedDisplayNames = [NSMutableArray array];
+        for (NSUInteger i = 0; i < versionNames.count; i++) {
+            [supportedIndices addObject:@(i)];
+            [supportedDisplayNames addObject:versionNames[i]];
+        }
     }
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
@@ -183,4 +195,5 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
+
 @end
