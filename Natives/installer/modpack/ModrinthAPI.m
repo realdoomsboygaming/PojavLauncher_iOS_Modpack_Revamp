@@ -25,7 +25,6 @@
         @"index": @"relevance",
         @"offset": @(modrinthSearchResult.count)
     };
-    // Synchronous call for search is acceptable when called on a background thread.
     NSDictionary *response = [self getEndpoint:@"search" params:params];
     if (!response) {
         return nil;
@@ -46,10 +45,34 @@
     return result;
 }
 
+- (void)loadDetailsOfModSync:(NSMutableDictionary *)item {
+    NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"project/%@/version", item[@"id"]] params:@{}];
+    if (!response) {
+        return;
+    }
+    NSArray<NSString *> *names = [response valueForKey:@"name"];
+    NSMutableArray *mcNames = [NSMutableArray new];
+    NSMutableArray *urls = [NSMutableArray new];
+    NSMutableArray *hashes = [NSMutableArray new];
+    NSMutableArray *sizes = [NSMutableArray new];
+    [response enumerateObjectsUsingBlock:^(NSDictionary *version, NSUInteger i, BOOL *stop) {
+        NSDictionary *file = [version[@"files"] firstObject];
+        [mcNames addObject:[version[@"game_versions"] firstObject]];
+        [sizes addObject:file[@"size"]];
+        [urls addObject:file[@"url"]];
+        NSDictionary *hashesMap = file[@"hashes"];
+        [hashes addObject:hashesMap[@"sha1"] ?: [NSNull null]];
+    }];
+    item[@"versionNames"] = names;
+    item[@"mcVersionNames"] = mcNames;
+    item[@"versionSizes"] = sizes;
+    item[@"versionUrls"] = urls;
+    item[@"versionHashes"] = hashes;
+    item[@"versionDetailsLoaded"] = @(YES);
+}
+
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item completion:(void (^)(NSError *error))completion {
-    // Build the endpoint URL using the mod's id.
     NSString *endpoint = [NSString stringWithFormat:@"project/%@/version", item[@"id"]];
-    // Use the asynchronous version of getEndpoint.
     [self getEndpoint:endpoint params:@{} completion:^(id response, NSError *error) {
         if (!response) {
             if (completion) completion(error);
@@ -62,7 +85,6 @@
         NSMutableArray *sizes = [NSMutableArray new];
         [response enumerateObjectsUsingBlock:^(NSDictionary *version, NSUInteger i, BOOL *stop) {
             NSDictionary *file = [version[@"files"] firstObject];
-            // Use the first game version available.
             [mcNames addObject:[version[@"game_versions"] firstObject]];
             [sizes addObject:file[@"size"]];
             [urls addObject:file[@"url"]];
