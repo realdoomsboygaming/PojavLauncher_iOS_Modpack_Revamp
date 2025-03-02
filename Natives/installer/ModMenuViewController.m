@@ -1,6 +1,6 @@
 #import "ModMenuViewController.h"
-#import "ModrinthAPI.h"
-#import "CurseForgeAPI.h"
+#import "modpack/ModrinthAPI.h"
+#import "modpack/CurseForgeAPI.h"
 #import "config.h"
 #import "UIKit+AFNetworking.h"
 #import "utils.h"
