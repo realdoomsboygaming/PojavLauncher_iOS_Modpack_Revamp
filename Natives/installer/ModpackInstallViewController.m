@@ -15,7 +15,7 @@
 #include <dlfcn.h>
 
 // Inline helper to display alerts.
-static inline void showDialog(NSString *title, NSString *message) {
+static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
@@ -101,7 +101,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                 [self switchToReadyState];
                 [self.tableView reloadData];
             } else {
-                showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
                 [self actionClose];
             }
         });
@@ -118,7 +118,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                 [self switchToReadyState];
                 [self.tableView reloadData];
             } else {
-                showDialog(localize(@"Error", nil), error.localizedDescription);
+                presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
                 [self actionClose];
             }
         });
@@ -226,7 +226,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                 } else if (self.sourceSegmentedControl.selectedSegmentIndex == 1) {
                     [self.curseForge installModpackFromDetail:self.list[indexPath.row] atIndex:i completion:^(NSError *error) {
                         if (error) {
-                            showDialog(localize(@"Error", nil), error.localizedDescription);
+                            presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
                         }
                     }];
                 }
@@ -284,7 +284,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                 [self showDetails:item atIndexPath:indexPath];
             } else {
                 NSString *errorMsg = self.sourceSegmentedControl.selectedSegmentIndex == 0 ? self.modrinth.lastError.localizedDescription : self.curseForge.lastError.localizedDescription;
-                showDialog(localize(@"Error", nil), errorMsg);
+                presentAlertDialog(localize(@"Error", nil), errorMsg);
             }
         });
     });
@@ -301,7 +301,7 @@ static inline void showDialog(NSString *title, NSString *message) {
     PLProfiles.current.profiles[profileName] = profile;
     [PLProfiles.current save];
     self.selectedProfileName = nil;
-    showDialog(@"Success", @"Mod added to profile.");
+    presentAlertDialog(@"Success", @"Mod added to profile.");
 }
 
 @end
