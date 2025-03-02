@@ -22,8 +22,9 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 };
 
 @interface LauncherProfilesViewController ()
+
 @property(nonatomic) UIBarButtonItem *createButtonItem;
-@property(nonatomic) UIBarButtonItem *modsButtonItem;
+
 @end
 
 @implementation LauncherProfilesViewController
@@ -41,16 +42,16 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-
-    UIMenu *createMenu = [UIMenu menuWithTitle:localize(@"profile.title.create", nil) image:nil identifier:nil
-                                         options:UIMenuOptionsDisplayInline
-                                        children:@[
+    
+    // Build create menu with a new "Mods" option.
+    UIMenu *createMenu = [UIMenu menuWithTitle:localize(@"profile.title.create", nil)
+                                        image:nil
+                                   identifier:nil
+                                      options:UIMenuOptionsDisplayInline
+                                     children:@[
         [UIAction actionWithTitle:@"Vanilla" image:nil identifier:@"vanilla" handler:^(UIAction *action) {
             [self actionEditProfile:@{@"name": @"", @"lastVersionId": @"latest-release"}];
         }],
-#if 0 // TODO
-        [UIAction actionWithTitle:@"OptiFine" image:nil identifier:@"optifine" handler:createHandler],
-#endif
         [UIAction actionWithTitle:@"Fabric/Quilt" image:nil identifier:@"fabric_or_quilt" handler:^(UIAction *action) {
             [self actionCreateFabricProfile];
         }],
@@ -59,11 +60,13 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
         }],
         [UIAction actionWithTitle:@"Modpack" image:nil identifier:@"modpack" handler:^(UIAction *action) {
             [self actionCreateModpackProfile];
+        }],
+        [UIAction actionWithTitle:@"Mods" image:nil identifier:@"mods" handler:^(UIAction *action) {
+            [self actionOpenMods];
         }]
     ]];
     
     self.createButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd menu:createMenu];
-    self.modsButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"MenuMods"] style:UIBarButtonItemStylePlain target:self action:@selector(actionOpenMods)];
     
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
@@ -71,11 +74,11 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-
-    // Add the new Mods button alongside the account and create buttons.
-    self.navigationItem.rightBarButtonItems = @[[sidebarViewController drawAccountButton], self.modsButtonItem, self.createButtonItem];
-
-    // Pickup changes made in the profile editor and switching instance
+    
+    // Place navigation buttons.
+    self.navigationItem.rightBarButtonItems = @[[sidebarViewController drawAccountButton], self.createButtonItem];
+    
+    // Update profiles.
     [PLProfiles updateCurrent];
     [self.tableView reloadData];
     [self.navigationController performSelector:@selector(reloadProfileList)];
@@ -103,16 +106,16 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
     [self presentNavigatedViewController:vc];
 }
 
-- (void)actionEditProfile:(NSDictionary *)profile {
-    LauncherProfileEditorViewController *vc = [LauncherProfileEditorViewController new];
-    vc.profile = profile.mutableCopy;
-    [self presentNavigatedViewController:vc];
-}
-
 - (void)actionOpenMods {
     ModMenuViewController *modMenuVC = [[ModMenuViewController alloc] init];
     modMenuVC.title = @"Mods";
     [self presentNavigatedViewController:modMenuVC];
+}
+
+- (void)actionEditProfile:(NSDictionary *)profile {
+    LauncherProfileEditorViewController *vc = [LauncherProfileEditorViewController new];
+    vc.profile = profile.mutableCopy;
+    [self presentNavigatedViewController:vc];
 }
 
 - (void)presentNavigatedViewController:(UIViewController *)vc {
@@ -167,11 +170,11 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 
 - (void)setupProfileCell:(UITableViewCell *) cell atRow:(NSInteger)row {
     NSMutableDictionary *profile = PLProfiles.current.profiles.allValues[row];
-
+    
     cell.textLabel.text = profile[@"name"];
     cell.detailTextLabel.text = profile[@"lastVersionId"];
     cell.imageView.layer.magnificationFilter = kCAFilterNearest;
-
+    
     UIImage *fallbackImage = [[UIImage imageNamed:@"DefaultProfile"] _imageWithSize:CGSizeMake(40, 40)];
     [cell.imageView setImageWithURL:[NSURL URLWithString:profile[@"icon"]] placeholderImage:fallbackImage];
 }
@@ -194,27 +197,27 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
         cell.userInteractionEnabled = YES;
         cell.accessoryView = nil;
     }
-
+    
     if (indexPath.section == kInstances) {
         [self setupInstanceCell:cell atRow:indexPath.row];
     } else {
         [self setupProfileCell:cell atRow:indexPath.row];
     }
-
+    
     cell.textLabel.enabled = cell.detailTextLabel.enabled = cell.userInteractionEnabled;
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:NO];
-
+    
     if (indexPath.section == kInstances) {
         if (indexPath.row == 0) {
             [self.navigationController pushViewController:[LauncherPrefGameDirViewController new] animated:YES];
         }
         return;
     }
-
+    
     [self actionEditProfile:PLProfiles.current.profiles.allValues[indexPath.row]];
 }
 
@@ -223,7 +226,7 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     if (editingStyle != UITableViewCellEditingStyleDelete) return;
-
+    
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     NSString *title = localize(@"preference.title.confirm", nil);
     NSString *message = [NSString stringWithFormat:localize(@"preference.title.confirm.delete_runtime", nil), cell.textLabel.text];
