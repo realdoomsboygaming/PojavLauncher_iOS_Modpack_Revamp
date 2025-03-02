@@ -4,13 +4,14 @@
 #import "UIKit+AFNetworking.h"
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
-#import "modpack/ModrinthAPI.h"
-#import "modpack/CurseForgeAPI.h"
+#import "ModrinthAPI.h"
+#import "CurseForgeAPI.h"
+#import "ModMenuViewController.h"
 #import "config.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "PLProfiles.h"
-#import "modpack/ModpackUtils.h"
+#import "ModpackUtils.h"
 #include <dlfcn.h>
 
 @interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
@@ -21,7 +22,7 @@
 @property (nonatomic, strong) NSMutableDictionary *filters;
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
-@property (nonatomic, strong) NSString *selectedProfileName; // non-nil if adding mod to profile
+@property (nonatomic, strong) NSString *selectedProfileName;
 @end
 
 @implementation ModpackInstallViewController
@@ -29,18 +30,15 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     
-    // Setup search controller.
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
-    // Initialize API objects.
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:CONFIG_CURSEFORGE_API_KEY];
     self.filters = [@{@"isModpack": @(YES), @"name": @" "} mutableCopy];
     
-    // Setup segmented control with three tabs.
     self.sourceSegmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge", @"Profiles"]];
     self.sourceSegmentedControl.selectedSegmentIndex = 0;
     [self.sourceSegmentedControl addTarget:self action:@selector(updateSearchResults) forControlEvents:UIControlEventValueChanged];
@@ -192,7 +190,7 @@
 
 - (void)showDetails:(NSDictionary *)details atIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-    NSMutableArray<UIAction *> *menuItems = [NSMutableArray new];
+    NSMutableArray<UIAction *> *menuItems = [[NSMutableArray alloc] init];
     [details[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *nameWithVersion = name;
         NSString *mcVersion = details[@"mcVersionNames"][i];
@@ -239,6 +237,11 @@
             self.sourceSegmentedControl.selectedSegmentIndex = 1;
             [self updateSearchResults];
         }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Mods" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            ModMenuViewController *modMenuVC = [[ModMenuViewController alloc] init];
+            modMenuVC.title = @"Mods";
+            [self.navigationController pushViewController:modMenuVC animated:YES];
+        }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
         return;
@@ -256,7 +259,6 @@
             [self.modrinth loadDetailsOfMod:self.list[indexPath.row]];
         } else if (self.sourceSegmentedControl.selectedSegmentIndex == 1) {
             [self.curseForge loadDetailsOfMod:self.list[indexPath.row] completion:^(NSError *error) {
-                // no-op; error handling below
             }];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
