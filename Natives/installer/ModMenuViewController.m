@@ -150,24 +150,34 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         }];
     }
 }
+#pragma mark - Version Filtering and Dropdown
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    // Filter supported versions by checking that each version string contains its corresponding Minecraft version.
     NSArray *versionNames = mod[@"versionNames"];
+    NSArray *mcVersionNames = mod[@"mcVersionNames"];
+    NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray new];
+    NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray new];
     for (NSUInteger i = 0; i < versionNames.count; i++) {
-        NSString *name = versionNames[i];
-        NSString *mcVersion = mod[@"mcVersionNames"][i];
-        NSString *displayName = [name hasSuffix:mcVersion] ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
+        NSString *version = versionNames[i];
+        NSString *mcVersion = mcVersionNames[i];
+        // Consider version supported if it contains the mcVersion substring.
+        if ([version rangeOfString:mcVersion].location != NSNotFound) {
+            [supportedIndices addObject:@(i)];
+            NSString *displayName = [version isEqualToString:mcVersion] ? version : [NSString stringWithFormat:@"%@ - %@", version, mcVersion];
+            [supportedDisplayNames addObject:displayName];
+        }
+    }
+    if (supportedIndices.count == 0) {
+        presentAlertDialog(localize(@"Error", nil), @"No supported versions available.");
+        return;
+    }
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSUInteger j = 0; j < supportedIndices.count; j++) {
+        NSUInteger idx = [supportedIndices[j] unsignedIntegerValue];
+        NSString *displayName = supportedDisplayNames[j];
         [alert addAction:[UIAlertAction actionWithTitle:displayName style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            [self.navigationController popViewControllerAnimated:YES];
-            if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
-                [self.modrinth installModpackFromDetail:mod atIndex:i];
-            } else {
-                [self.curseForge installModpackFromDetail:mod atIndex:i completion:^(NSError *error) {
-                    if (error) {
-                        presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
-                    }
-                }];
-            }
+            [self.modrinth installModpackFromDetail:mod atIndex:idx];
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
