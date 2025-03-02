@@ -4,14 +4,14 @@
 #import "UIKit+AFNetworking.h"
 #import "UIKit+hook.h"
 #import "WFWorkflowProgressView.h"
-#import "ModrinthAPI.h"
-#import "CurseForgeAPI.h"
+#import "modpack/ModrinthAPI.h"
+#import "modpack/CurseForgeAPI.h"
 #import "ModMenuViewController.h"
 #import "config.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 #import "PLProfiles.h"
-#import "ModpackUtils.h"
+#import "modpack/ModpackUtils.h"
 #include <dlfcn.h>
 
 @interface ModpackInstallViewController () <UIContextMenuInteractionDelegate>
