@@ -5,6 +5,20 @@
 #import "UIKit+AFNetworking.h"
 #import "utils.h"
 
+// Stub definitions for missing functions.
+static inline void showDialog(NSString *title, NSString *message) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
+    [root presentViewController:alert animated:YES completion:nil];
+}
+
+static inline NSString *localize(NSString *key, id unused) {
+    return key;
+}
+
 @interface ModMenuViewController ()
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UISegmentedControl *apiSegmentedControl;
@@ -21,7 +35,7 @@
     
     self.title = @"Mods";
     self.modrinth = [ModrinthAPI new];
-    self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:CONFIG_CURSEFORGE_API_KEY];
+    self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:(CONFIG_CURSEFORGE_API_KEY ?: @"")];
     self.searchFilters = [@{@"isModpack": @(NO), @"name": @" "} mutableCopy];
     self.modsList = [NSMutableArray new];
     
@@ -134,7 +148,6 @@
     }
 }
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     NSMutableArray<UIAction *> *menuItems = [NSMutableArray new];
     [mod[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
         NSString *displayName = name;
@@ -155,9 +168,15 @@
             }
         }]];
     }];
-    UIMenu *menu = [UIMenu menuWithTitle:@"" children:menuItems];
-    UIContextMenuInteraction *interaction = [[UIContextMenuInteraction alloc] initWithDelegate:(id)self];
-    cell.detailTextLabel.interactions = @[interaction];
-    [interaction _presentMenuAtLocation:CGPointZero];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (UIAction *action in menuItems) {
+        [alert addAction:[UIAlertAction actionWithTitle:action.title style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull alertAction) {
+            if (action.handler) {
+                action.handler(action);
+            }
+        }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 @end
