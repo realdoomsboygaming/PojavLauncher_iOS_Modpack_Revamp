@@ -5,7 +5,8 @@
 #import "UIKit+AFNetworking.h"
 #import "utils.h"
 
-static inline void showDialog(NSString *title, NSString *message) {
+// Inline helper to display alerts.
+static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
@@ -70,7 +71,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                     self.modsList = results;
                     [self.tableView reloadData];
                 } else {
-                    showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                    presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
                 }
             });
         });
@@ -81,7 +82,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                     self.modsList = results;
                     [self.tableView reloadData];
                 } else {
-                    showDialog(localize(@"Error", nil), error.localizedDescription);
+                    presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
                 }
             });
         }];
@@ -132,7 +133,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                     [self.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
                     [self showModDetails:modMutable atIndexPath:indexPath];
                 } else {
-                    showDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                    presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
                 }
             });
         });
@@ -143,7 +144,7 @@ static inline void showDialog(NSString *title, NSString *message) {
                     [self.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
                     [self showModDetails:modMutable atIndexPath:indexPath];
                 } else {
-                    showDialog(localize(@"Error", nil), self.curseForge.lastError.localizedDescription);
+                    presentAlertDialog(localize(@"Error", nil), self.curseForge.lastError.localizedDescription);
                 }
             });
         }];
@@ -163,7 +164,7 @@ static inline void showDialog(NSString *title, NSString *message) {
             } else {
                 [self.curseForge installModpackFromDetail:mod atIndex:i completion:^(NSError *error) {
                     if (error) {
-                        showDialog(localize(@"Error", nil), error.localizedDescription);
+                        presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
                     }
                 }];
             }
