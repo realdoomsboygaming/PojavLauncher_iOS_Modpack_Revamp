@@ -36,7 +36,7 @@
     self.navigationItem.searchController = self.searchController;
     
     self.modrinth = [ModrinthAPI new];
-    self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:CONFIG_CURSEFORGE_API_KEY];
+    self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:(CONFIG_CURSEFORGE_API_KEY ?: @"")];
     self.filters = [@{@"isModpack": @(YES), @"name": @" "} mutableCopy];
     
     self.sourceSegmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge", @"Profiles"]];
@@ -288,3 +288,4 @@
 }
 
 @end
+
