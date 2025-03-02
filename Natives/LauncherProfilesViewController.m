@@ -12,6 +12,7 @@
 #import "installer/FabricInstallViewController.h"
 #import "installer/ForgeInstallViewController.h"
 #import "installer/ModpackInstallViewController.h"
+#import "installer/ModMenuViewController.h"
 #import "ios_uikit_bridge.h"
 #import "utils.h"
 
@@ -20,9 +21,9 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
     kProfiles
 };
 
-@interface LauncherProfilesViewController () //<UIContextMenuInteractionDelegate>
-
+@interface LauncherProfilesViewController ()
 @property(nonatomic) UIBarButtonItem *createButtonItem;
+@property(nonatomic) UIBarButtonItem *modsButtonItem;
 @end
 
 @implementation LauncherProfilesViewController
@@ -42,38 +43,28 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
     [super viewDidLoad];
 
     UIMenu *createMenu = [UIMenu menuWithTitle:localize(@"profile.title.create", nil) image:nil identifier:nil
-    options:UIMenuOptionsDisplayInline
-    children:@[
-        [UIAction
-            actionWithTitle:@"Vanilla" image:nil
-            identifier:@"vanilla" handler:^(UIAction *action) {
-                [self actionEditProfile:@{
-                    @"name": @"",
-                    @"lastVersionId": @"latest-release"}];
-            }],
+                                         options:UIMenuOptionsDisplayInline
+                                        children:@[
+        [UIAction actionWithTitle:@"Vanilla" image:nil identifier:@"vanilla" handler:^(UIAction *action) {
+            [self actionEditProfile:@{@"name": @"", @"lastVersionId": @"latest-release"}];
+        }],
 #if 0 // TODO
-        [UIAction
-            actionWithTitle:@"OptiFine" image:nil
-            identifier:@"optifine" handler:createHandler],
+        [UIAction actionWithTitle:@"OptiFine" image:nil identifier:@"optifine" handler:createHandler],
 #endif
-        [UIAction
-            actionWithTitle:@"Fabric/Quilt" image:nil
-            identifier:@"fabric_or_quilt" handler:^(UIAction *action) {
-                [self actionCreateFabricProfile];
-            }],
-        [UIAction
-            actionWithTitle:@"Forge" image:nil
-            identifier:@"forge" handler:^(UIAction *action) {
-                [self actionCreateForgeProfile];
-            }],
-        [UIAction
-            actionWithTitle:@"Modpack" image:nil
-            identifier:@"modpack" handler:^(UIAction *action) {
-                [self actionCreateModpackProfile];
-            }]
+        [UIAction actionWithTitle:@"Fabric/Quilt" image:nil identifier:@"fabric_or_quilt" handler:^(UIAction *action) {
+            [self actionCreateFabricProfile];
+        }],
+        [UIAction actionWithTitle:@"Forge" image:nil identifier:@"forge" handler:^(UIAction *action) {
+            [self actionCreateForgeProfile];
+        }],
+        [UIAction actionWithTitle:@"Modpack" image:nil identifier:@"modpack" handler:^(UIAction *action) {
+            [self actionCreateModpackProfile];
+        }]
     ]];
+    
     self.createButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd menu:createMenu];
-
+    self.modsButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"MenuMods"] style:UIBarButtonItemStylePlain target:self action:@selector(actionOpenMods)];
+    
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
 }
@@ -81,8 +72,8 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
 
-    // Put navigation buttons back in place
-    self.navigationItem.rightBarButtonItems = @[[sidebarViewController drawAccountButton], self.createButtonItem];
+    // Add the new Mods button alongside the account and create buttons.
+    self.navigationItem.rightBarButtonItems = @[[sidebarViewController drawAccountButton], self.modsButtonItem, self.createButtonItem];
 
     // Pickup changes made in the profile editor and switching instance
     [PLProfiles updateCurrent];
@@ -118,9 +109,14 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
     [self presentNavigatedViewController:vc];
 }
 
+- (void)actionOpenMods {
+    ModMenuViewController *modMenuVC = [[ModMenuViewController alloc] init];
+    modMenuVC.title = @"Mods";
+    [self presentNavigatedViewController:modMenuVC];
+}
+
 - (void)presentNavigatedViewController:(UIViewController *)vc {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    //nav.navigationBar.prefersLargeTitles = YES;
     [self presentViewController:nav animated:YES completion:nil];
 }
 
@@ -230,7 +226,6 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 
     UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     NSString *title = localize(@"preference.title.confirm", nil);
-    // reusing the delete runtime message
     NSString *message = [NSString stringWithFormat:localize(@"preference.title.confirm.delete_runtime", nil), cell.textLabel.text];
     UIAlertController *confirmAlert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleActionSheet];
     confirmAlert.popoverPresentationController.sourceView = cell;
@@ -238,7 +233,6 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
     UIAlertAction *ok = [UIAlertAction actionWithTitle:localize(@"OK", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
         [PLProfiles.current.profiles removeObjectForKey:cell.textLabel.text];
         if ([PLProfiles.current.selectedProfileName isEqualToString:cell.textLabel.text]) {
-            // The one being deleted is the selected one, switch to the random one now
             PLProfiles.current.selectedProfileName = PLProfiles.current.profiles.allKeys[0];
             [self.navigationController performSelector:@selector(reloadProfileList)];
         } else {
@@ -254,7 +248,7 @@ typedef NS_ENUM(NSUInteger, LauncherProfilesTableSection) {
 
 - (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    if (indexPath.section == kInstances || PLProfiles.current.profiles.count==1) {
+    if (indexPath.section == kInstances || PLProfiles.current.profiles.count == 1) {
         return UITableViewCellEditingStyleNone;
     }
     return UITableViewCellEditingStyleDelete;
