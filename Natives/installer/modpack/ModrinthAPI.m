@@ -1,5 +1,5 @@
 #import "MinecraftResourceDownloadTask.h"
-#import "ModrinthAPI.h"
+#import "modpack/ModrinthAPI.h"
 #import "PLProfiles.h"
 
 @implementation ModrinthAPI
