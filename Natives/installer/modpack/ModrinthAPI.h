@@ -12,7 +12,10 @@ NS_ASSUME_NONNULL_BEGIN
 // Asynchronous version (calls completion on the main thread)
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item completion:(void (^)(NSError *error))completion;
 
-// New mod installation method (for mods, not modpacks)
+// For backward compatibility.
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item;
+
+// New method for installing individual mods.
 - (void)installModFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion;
 
 @end
