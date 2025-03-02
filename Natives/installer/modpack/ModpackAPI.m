@@ -5,7 +5,7 @@
 
 @implementation ModpackAPI
 
-#pragma mark Interface methods
+#pragma mark - Interface methods
 
 - (instancetype)initWithURL:(NSString *)url {
     self = [super init];
@@ -32,28 +32,34 @@
     dispatch_group_enter(group);
     NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
     AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
-    [manager GET:url parameters:params headers:nil progress:nil
-    success:^(NSURLSessionTask *task, id obj) {
-        result = obj;
+    [manager GET:url parameters:params headers:nil progress:nil success:^(NSURLSessionTask *task, id responseObject) {
+        result = responseObject;
         dispatch_group_leave(group);
     } failure:^(NSURLSessionTask *operation, NSError *error) {
         self.lastError = error;
         dispatch_group_leave(group);
     }];
     dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
-    //NSLog(@"%@", result);
     return result;
 }
 
+- (void)getEndpoint:(NSString *)endpoint params:(NSDictionary *)params completion:(void (^)(id result, NSError *error))completion {
+    NSString *url = [self.baseURL stringByAppendingPathComponent:endpoint];
+    AFHTTPSessionManager *manager = [AFHTTPSessionManager manager];
+    [manager GET:url parameters:params headers:nil progress:nil success:^(NSURLSessionTask *task, id responseObject) {
+        if (completion) completion(responseObject, nil);
+    } failure:^(NSURLSessionTask *operation, NSError *error) {
+        self.lastError = error;
+        if (completion) completion(nil, error);
+    }];
+}
+
 - (void)installModpackFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion {
-    // Pass details to LauncherNavigationController
     NSDictionary* userInfo = @{
         @"detail": modDetail,
         @"index": @(selectedVersion)
     };
-    [NSNotificationCenter.defaultCenter 
-        postNotificationName:@"InstallModpack" 
-        object:self userInfo:userInfo];
+    [NSNotificationCenter.defaultCenter postNotificationName:@"InstallModpack" object:self userInfo:userInfo];
 }
 
 @end
