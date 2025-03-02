@@ -5,20 +5,6 @@
 #import "UIKit+AFNetworking.h"
 #import "utils.h"
 
-// Stub definitions for missing functions.
-static inline void showDialog(NSString *title, NSString *message) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
-                                                                   message:message
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-    [root presentViewController:alert animated:YES completion:nil];
-}
-
-static inline NSString *localize(NSString *key, id unused) {
-    return key;
-}
-
 @interface ModMenuViewController ()
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UISegmentedControl *apiSegmentedControl;
@@ -148,14 +134,13 @@ static inline NSString *localize(NSString *key, id unused) {
     }
 }
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
-    NSMutableArray<UIAction *> *menuItems = [NSMutableArray new];
-    [mod[@"versionNames"] enumerateObjectsUsingBlock:^(NSString *name, NSUInteger i, BOOL *stop) {
-        NSString *displayName = name;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *versionNames = mod[@"versionNames"];
+    for (NSUInteger i = 0; i < versionNames.count; i++) {
+        NSString *name = versionNames[i];
         NSString *mcVersion = mod[@"mcVersionNames"][i];
-        if (![name hasSuffix:mcVersion]) {
-            displayName = [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
-        }
-        [menuItems addObject:[UIAction actionWithTitle:displayName image:nil identifier:nil handler:^(UIAction *action) {
+        NSString *displayName = [name hasSuffix:mcVersion] ? name : [NSString stringWithFormat:@"%@ - %@", name, mcVersion];
+        [alert addAction:[UIAlertAction actionWithTitle:displayName style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             [self.navigationController popViewControllerAnimated:YES];
             if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
                 [self.modrinth installModpackFromDetail:mod atIndex:i];
@@ -165,14 +150,6 @@ static inline NSString *localize(NSString *key, id unused) {
                         showDialog(localize(@"Error", nil), error.localizedDescription);
                     }
                 }];
-            }
-        }]];
-    }];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (UIAction *action in menuItems) {
-        [alert addAction:[UIAlertAction actionWithTitle:action.title style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull alertAction) {
-            if (action.handler) {
-                action.handler(action);
             }
         }]];
     }
