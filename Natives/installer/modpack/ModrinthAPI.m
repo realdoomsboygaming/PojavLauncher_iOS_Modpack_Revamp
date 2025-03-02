@@ -52,7 +52,7 @@
         NSLog(@"loadDetailsOfModSync: No response for mod id %@", item[@"id"]);
         return;
     }
-    NSArray<NSString *> *names = [response valueForKey:@"name"];
+    NSArray *names = [response valueForKey:@"name"];
     NSMutableArray *mcNames = [NSMutableArray new];
     NSMutableArray *urls = [NSMutableArray new];
     NSMutableArray *hashes = [NSMutableArray new];
@@ -114,8 +114,12 @@
     }];
 }
 
+// For backward compatibility.
+- (void)loadDetailsOfMod:(NSMutableDictionary *)item {
+    [self loadDetailsOfMod:item completion:nil];
+}
+
 // New method for installing individual mods.
-// This posts a different notification ("InstallMod") that your mod installer can handle.
 - (void)installModFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion {
     NSDictionary *userInfo = @{@"detail": modDetail, @"index": @(selectedVersion)};
     [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallMod" object:self userInfo:userInfo];
