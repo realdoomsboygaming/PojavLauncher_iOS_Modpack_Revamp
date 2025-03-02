@@ -160,7 +160,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     
-    // Filter supported versions by checking that the version string contains its corresponding Minecraft version.
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     for (NSUInteger i = 0; i < versionNames.count; i++) {
@@ -173,7 +172,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         }
     }
     
-    // If no supported versions found, fallback to all versions.
     if (supportedIndices.count == 0) {
         NSLog(@"showModDetails: No supported versions found, falling back to all versions.");
         supportedIndices = [NSMutableArray array];
@@ -189,7 +187,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         NSUInteger idx = [supportedIndices[j] unsignedIntegerValue];
         NSString *displayName = supportedDisplayNames[j];
         [alert addAction:[UIAlertAction actionWithTitle:displayName style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-            [self.modrinth installModpackFromDetail:mod atIndex:idx];
+            [self.modrinth installModFromDetail:mod atIndex:idx];
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
