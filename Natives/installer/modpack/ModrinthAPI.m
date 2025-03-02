@@ -27,6 +27,7 @@
     };
     NSDictionary *response = [self getEndpoint:@"search" params:params];
     if (!response) {
+        NSLog(@"ModrinthAPI.searchModWithFilters: No response returned");
         return nil;
     }
     NSMutableArray *result = modrinthSearchResult ?: [NSMutableArray new];
@@ -45,15 +46,10 @@
     return result;
 }
 
-// Plain loadDetailsOfMod: implementation for compatibility.
-// This calls the asynchronous version with a nil completion block.
-- (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    [self loadDetailsOfMod:item completion:nil];
-}
-
 - (void)loadDetailsOfModSync:(NSMutableDictionary *)item {
     NSArray *response = [self getEndpoint:[NSString stringWithFormat:@"project/%@/version", item[@"id"]] params:@{}];
     if (!response) {
+        NSLog(@"loadDetailsOfModSync: No response for mod id %@", item[@"id"]);
         return;
     }
     NSArray<NSString *> *names = [response valueForKey:@"name"];
@@ -116,6 +112,13 @@
         NSLog(@"loadDetailsOfMod: Loaded %lu versions for mod %@", (unsigned long)names.count, item[@"id"]);
         if (completion) completion(nil);
     }];
+}
+
+// New method for installing individual mods.
+// This posts a different notification ("InstallMod") that your mod installer can handle.
+- (void)installModFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion {
+    NSDictionary *userInfo = @{@"detail": modDetail, @"index": @(selectedVersion)};
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallMod" object:self userInfo:userInfo];
 }
 
 @end
