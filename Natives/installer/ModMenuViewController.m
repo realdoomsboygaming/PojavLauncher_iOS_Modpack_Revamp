@@ -6,7 +6,7 @@
 #import "utils.h"
 #import "PLProfiles.h"
 
-// Helper to display alerts.
+// Helper function to show alert dialogs.
 static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
@@ -16,9 +16,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                             handler:nil]];
     UIWindow *window = nil;
     if (@available(iOS 13.0, *)) {
-         window = [UIApplication sharedApplication].windows.firstObject;
+        window = [UIApplication sharedApplication].windows.firstObject;
     } else {
-         window = [UIApplication sharedApplication].keyWindow;
+        window = [UIApplication sharedApplication].keyWindow;
     }
     [window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
@@ -57,7 +57,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self.apiSegmentedControl addTarget:self action:@selector(updateModsList) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.apiSegmentedControl;
     
-    // Add profile selection button.
+    // Profile selection button.
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Profile"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:self
@@ -100,6 +100,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
+    // Use the view's center for iPad popover.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
                                                                 CGRectGetMidY(self.view.bounds),
@@ -186,7 +187,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 }
 
 - (void)loadModDetailsForMod:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
-    __block NSMutableDictionary *modMutable = [mod mutableCopy];
+    NSMutableDictionary *modMutable = [mod mutableCopy];
     __weak typeof(self) weakSelf = self;
     if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -217,11 +218,11 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     }
 }
 
-#pragma mark - Version Filtering and Dropdown
+#pragma mark - Version Filtering and Action Sheet
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    // Use 'gameVersions' for Modrinth and fallback to 'mcVersionNames' for CurseForge.
+    // Use 'gameVersions' for Modrinth; fallback to 'mcVersionNames' for CurseForge.
     NSArray *gameVersionsArray = mod[@"gameVersions"] ?: mod[@"mcVersionNames"];
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
@@ -243,6 +244,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                 [supportedDisplayNames addObject:displayName];
             }
         }
+        // If no versions match the selected profile, fallback to show all versions.
         if (supportedIndices.count == 0) {
             for (NSUInteger i = 0; i < versionNames.count; i++) {
                 [supportedIndices addObject:@(i)];
@@ -278,15 +280,21 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    // Properly configure popover presentation for iPad.
+    
+    // For iPad: anchor the popover to the tapped cell.
     if (alert.popoverPresentationController) {
-        if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+        if (cell) {
+            alert.popoverPresentationController.sourceView = cell;
+            alert.popoverPresentationController.sourceRect = cell.bounds;
+        } else {
             alert.popoverPresentationController.sourceView = self.view;
             alert.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
                                                                         CGRectGetMidY(self.view.bounds),
                                                                         1, 1);
         }
     }
+    
     [self presentViewController:alert animated:YES completion:nil];
 }
 
