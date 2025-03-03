@@ -30,7 +30,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
-// New properties for profile selection – used only for filtering version dropdown.
+// New properties for profile selection – used only for filtering the version dropdown.
 @property (nonatomic, strong) NSString *selectedProfileName;
 @property (nonatomic, strong) NSString *selectedMCVersion;
 @end
@@ -226,21 +226,25 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     NSLog(@"showModDetails: gameVersions: %@", gameVersionsArray);
     
-    if (self.selectedMCVersion.length == 0) {
-        presentAlertDialog(localize(@"Error", nil), @"No profile Minecraft version selected. Please choose a profile first.");
-        return;
-    }
-    
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     
-    for (NSUInteger i = 0; i < versionNames.count; i++) {
-        NSArray *gv = gameVersionsArray[i];
-        if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) continue;
-        if ([gv containsObject:self.selectedMCVersion]) {
+    // If no profile is selected, show all versions.
+    if (self.selectedMCVersion.length == 0) {
+        for (NSUInteger i = 0; i < versionNames.count; i++) {
             [supportedIndices addObject:@(i)];
-            NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
-            [supportedDisplayNames addObject:displayName];
+            [supportedDisplayNames addObject:versionNames[i]];
+        }
+    } else {
+        // Filter versions by checking if the selectedMCVersion is present in each version's gameVersions array.
+        for (NSUInteger i = 0; i < versionNames.count; i++) {
+            NSArray *gv = gameVersionsArray[i];
+            if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) continue;
+            if ([gv containsObject:self.selectedMCVersion]) {
+                [supportedIndices addObject:@(i)];
+                NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
+                [supportedDisplayNames addObject:displayName];
+            }
         }
     }
     
@@ -264,7 +268,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    // For iPad compatibility.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
                                                                 self.view.bounds.size.height,
