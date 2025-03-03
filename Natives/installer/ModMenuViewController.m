@@ -30,6 +30,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
+// New properties for profile selection.
 @property (nonatomic, strong) NSString *selectedProfileName;
 @property (nonatomic, strong) NSString *selectedMCVersion;
 @end
@@ -221,7 +222,11 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *gameVersionsArray = mod[@"gameVersions"];
+    // Fix: Use 'gameVersions' for Modrinth and fallback to 'mcVersionNames' for CurseForge.
+    NSArray *gameVersionsArray = mod[@"gameVersions"] ?: mod[@"mcVersionNames"];
+    
+    NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
+    NSLog(@"showModDetails: gameVersions: %@", gameVersionsArray);
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
@@ -233,8 +238,10 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         }
     } else {
         for (NSUInteger i = 0; i < versionNames.count; i++) {
-            NSArray *gv = gameVersionsArray[i];
-            if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) continue;
+            // Ensure gameVersionsArray element is an array; if it's a string, wrap it.
+            id gvItem = gameVersionsArray[i];
+            NSArray *gv = [gvItem isKindOfClass:[NSArray class]] ? gvItem : (@[gvItem]);
+            if (gv.count == 0) continue;
             if ([gv containsObject:self.selectedMCVersion]) {
                 [supportedIndices addObject:@(i)];
                 NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
