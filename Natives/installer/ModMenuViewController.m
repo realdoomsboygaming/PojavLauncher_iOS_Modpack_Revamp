@@ -30,9 +30,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
-// New properties for profile filtering.
+// New properties for profile selection.
 @property (nonatomic, strong) NSString *selectedProfileName;
-@property (nonatomic, strong) NSString *selectedMCVersion;
+@property (nonatomic, strong) NSString *selectedMCVersion;  // Only used for filtering versions in the dropdown.
 @end
 
 @implementation ModMenuViewController
@@ -43,6 +43,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.title = @"Mods";
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:(CONFIG_CURSEFORGE_API_KEY ?: @"")];
+    // Do not add the mcVersion to search filters – that will be applied only in the version dropdown.
     self.searchFilters = [@{@"isModpack": @(NO), @"name": @" "} mutableCopy];
     self.modsList = [NSMutableArray new];
     
@@ -83,7 +84,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
             self.selectedProfileName = name;
-            // Parse Minecraft version from lastVersionId (assumes format like "1.16.5-forge-36.2.0").
+            // Parse the Minecraft version from the profile's lastVersionId.
             NSString *lastVersionId = profile[@"lastVersionId"];
             NSRange dashRange = [lastVersionId rangeOfString:@"-"];
             if (dashRange.location != NSNotFound) {
@@ -91,15 +92,17 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
             } else {
                 self.selectedMCVersion = lastVersionId;
             }
-            self.searchFilters[@"mcVersion"] = self.selectedMCVersion;
-            [self updateModsList];
+            // Do not modify searchFilters here – the selectedMCVersion will only be applied in the version dropdown.
+            // Optionally, you can update the UI or display the selected profile info.
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     alert.popoverPresentationController.sourceView = self.view;
-    alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2, self.view.bounds.size.height, 1, 1);
+    alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
+                                                                self.view.bounds.size.height,
+                                                                1, 1);
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -204,11 +207,11 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *gameVersionsArray = mod[@"gameVersions"]; // Each element is an array of game_versions.
+    NSArray *gameVersionsArray = mod[@"gameVersions"]; // Each element is an array of supported game versions.
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     
-    // Filter to include only versions supported by the selected Minecraft version.
+    // Filter versions only based on selectedMCVersion.
     if (self.selectedMCVersion.length == 0) {
         presentAlertDialog(localize(@"Error", nil), @"No profile Minecraft version selected. Please choose a profile first.");
         return;
@@ -216,10 +219,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
-    
     for (NSUInteger i = 0; i < versionNames.count; i++) {
         NSArray *gv = gameVersionsArray[i];
-        // Only include if the selectedMCVersion is in the array of supported game versions.
+        // Include only if the selectedMCVersion is in the gameVersions array.
         if ([gv containsObject:self.selectedMCVersion]) {
             [supportedIndices addObject:@(i)];
             NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
