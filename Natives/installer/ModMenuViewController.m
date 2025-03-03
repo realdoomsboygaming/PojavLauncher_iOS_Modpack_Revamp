@@ -85,7 +85,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     return self.queue.count;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {    
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"QueueCell"];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"QueueCell"];
@@ -142,7 +142,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.modsList = [NSMutableArray new];
     self.installQueue = [NSMutableArray new];
     
-    // Setup modern search controller.
+    // Setup search controller.
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -329,11 +329,13 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     
     if (self.selectedMCVersion.length == 0) {
+        // No profile selected: show all versions.
         for (NSUInteger i = 0; i < versionNames.count; i++) {
             [supportedIndices addObject:@(i)];
             [supportedDisplayNames addObject:versionNames[i]];
         }
     } else {
+        // Filter versions that support the selected profile version.
         for (NSUInteger i = 0; i < versionNames.count; i++) {
             id gvItem = gameVersionsArray[i];
             NSArray *gv = [gvItem isKindOfClass:[NSArray class]] ? gvItem : (@[gvItem]);
@@ -345,7 +347,25 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
             }
         }
         if (supportedIndices.count == 0) {
-            presentAlertDialog(localize(@"Error", nil), @"No supported versions available for your selected profile.");
+            // Instead of silently failing, show an action sheet indicating no supported versions.
+            UIAlertController *noSupportAlert = [UIAlertController alertControllerWithTitle:@"No Supported Versions"
+                                                                                    message:@"There are no supported versions available for your selected profile for this mod."
+                                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+            [noSupportAlert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil)
+                                                               style:UIAlertActionStyleCancel
+                                                             handler:nil]];
+            if (noSupportAlert.popoverPresentationController) {
+                UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+                if (cell) {
+                    noSupportAlert.popoverPresentationController.sourceView = cell;
+                    noSupportAlert.popoverPresentationController.sourceRect = cell.bounds;
+                } else {
+                    noSupportAlert.popoverPresentationController.sourceView = self.view;
+                    noSupportAlert.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                                                                                        CGRectGetMidY(self.view.bounds), 1, 1);
+                }
+            }
+            [self presentViewController:noSupportAlert animated:YES completion:nil];
             return;
         }
     }
@@ -359,7 +379,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         [versionAlert addAction:[UIAlertAction actionWithTitle:displayName
                                                          style:UIAlertActionStyleDefault
                                                        handler:^(UIAlertAction * _Nonnull action) {
-            // Prompt user to either install immediately or add to queue.
+            // Prompt the user to install immediately or add to the install queue.
             UIAlertController *choiceAlert = [UIAlertController alertControllerWithTitle:@"Install or Queue?"
                                                                                    message:@"Choose to install now or add to the install queue."
                                                                             preferredStyle:UIAlertControllerStyleAlert];
