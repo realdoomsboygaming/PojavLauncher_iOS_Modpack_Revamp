@@ -6,7 +6,7 @@
 #import "utils.h"
 #import "PLProfiles.h"
 
-// Helper function to show alert dialogs.
+// Helper function to present alert dialogs.
 static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
@@ -45,7 +45,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.searchFilters = [@{@"isModpack": @(NO), @"name": @""} mutableCopy];
     self.modsList = [NSMutableArray new];
     
-    // Setup search controller.
+    // Setup modern search controller.
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -100,7 +100,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    // Use the view's center for iPad popover.
+    // Anchor on the view center for iPad.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
                                                                 CGRectGetMidY(self.view.bounds),
@@ -222,18 +222,20 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    // Use 'gameVersions' for Modrinth; fallback to 'mcVersionNames' for CurseForge.
+    // Use 'gameVersions' for Modrinth and fallback to 'mcVersionNames' for CurseForge.
     NSArray *gameVersionsArray = mod[@"gameVersions"] ?: mod[@"mcVersionNames"];
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     
     if (self.selectedMCVersion.length == 0) {
+        // If no profile is selected, show all versions.
         for (NSUInteger i = 0; i < versionNames.count; i++) {
             [supportedIndices addObject:@(i)];
             [supportedDisplayNames addObject:versionNames[i]];
         }
     } else {
+        // Filter versions that support the selected Minecraft version.
         for (NSUInteger i = 0; i < versionNames.count; i++) {
             id gvItem = gameVersionsArray[i];
             NSArray *gv = [gvItem isKindOfClass:[NSArray class]] ? gvItem : (@[gvItem]);
@@ -244,12 +246,10 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                 [supportedDisplayNames addObject:displayName];
             }
         }
-        // If no versions match the selected profile, fallback to show all versions.
+        // If no supported version is found, inform the user.
         if (supportedIndices.count == 0) {
-            for (NSUInteger i = 0; i < versionNames.count; i++) {
-                [supportedIndices addObject:@(i)];
-                [supportedDisplayNames addObject:versionNames[i]];
-            }
+            presentAlertDialog(localize(@"Error", nil), @"No supported versions available for your selected profile.");
+            return;
         }
     }
     
@@ -281,7 +281,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     
-    // For iPad: anchor the popover to the tapped cell.
+    // Anchor the popover to the tapped cell for iPad support.
     if (alert.popoverPresentationController) {
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
         if (cell) {
