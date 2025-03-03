@@ -6,6 +6,26 @@
 #import "utils.h"
 #import "PLProfiles.h"
 
+// Forward declaration for helper function.
+static inline void presentAlertDialog(NSString *title, NSString *message);
+
+// Helper function to present alert dialogs.
+static inline void presentAlertDialog(NSString *title, NSString *message) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil)
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    UIWindow *window = nil;
+    if (@available(iOS 13.0, *)) {
+        window = [UIApplication sharedApplication].windows.firstObject;
+    } else {
+        window = [UIApplication sharedApplication].keyWindow;
+    }
+    [window.rootViewController presentViewController:alert animated:YES completion:nil];
+}
+
 #pragma mark - ModQueueViewController Interface
 
 @interface ModQueueViewController : UITableViewController
@@ -33,13 +53,7 @@
 
 - (void)installQueueAction {
     if (self.queue.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Queue Empty"
-                                                                       message:@"There are no mods in the install queue."
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil)
-                                                  style:UIAlertActionStyleDefault
-                                                handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+        presentAlertDialog(localize(@"Queue Empty", nil), @"There are no mods in the install queue.");
         return;
     }
     // Trigger installation for each queued mod.
@@ -47,12 +61,9 @@
         NSDictionary *mod = entry[@"mod"];
         NSUInteger versionIndex = [entry[@"versionIndex"] unsignedIntegerValue];
         NSNumber *apiSource = mod[@"apiSource"];
-        // If using Modrinth API.
         if ([apiSource integerValue] == 1) {
-            // Immediate install via Modrinth.
             [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallMod" object:nil userInfo:@{@"detail": mod, @"index": @(versionIndex)}];
         } else {
-            // For CurseForge, check if modpack.
             if ([mod[@"isModpack"] boolValue]) {
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallModpack" object:nil userInfo:@{@"detail": mod, @"index": @(versionIndex)}];
             } else {
@@ -60,21 +71,12 @@
             }
         }
     }
-    // Clear the queue and notify the caller.
     [self.queue removeAllObjects];
     if (self.didFinishInstallation) {
         self.didFinishInstallation();
     }
     [self.tableView reloadData];
-    UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:@"Installation Started"
-                                                                         message:@"Queued mod installations have been triggered."
-                                                                  preferredStyle:UIAlertControllerStyleAlert];
-    [doneAlert addAction:[UIAlertAction actionWithTitle:localize(@"OK", nil)
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(UIAlertAction * _Nonnull action) {
-        [self.navigationController dismissViewControllerAnimated:YES completion:nil];
-    }]];
-    [self presentViewController:doneAlert animated:YES completion:nil];
+    presentAlertDialog(@"Installation Started", @"Queued mod installations have been triggered.");
 }
 
 #pragma mark - Table view data source
@@ -83,7 +85,7 @@
     return self.queue.count;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {    
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"QueueCell"];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"QueueCell"];
@@ -101,14 +103,14 @@
     return cell;
 }
 
-// Support deletion.
-- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle 
  forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (editingStyle == UITableViewCellEditingStyleDelete) {
         [self.queue removeObjectAtIndex:indexPath.row];
         [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
     }
 }
+
 @end
 
 #pragma mark - ModMenuViewController Interface
@@ -123,7 +125,7 @@
 @property (nonatomic, strong) NSString *selectedProfileName;
 @property (nonatomic, strong) NSString *selectedMCVersion;
 // New install queue property.
-@property (nonatomic, strong) NSMutableArray *installQueue; // Array of dictionaries with keys: @"mod" and @"versionIndex"
+@property (nonatomic, strong) NSMutableArray *installQueue; // Array of dictionaries: @{@"mod": modDictionary, @"versionIndex": @(index)}
 @end
 
 #pragma mark - ModMenuViewController Implementation
@@ -140,7 +142,7 @@
     self.modsList = [NSMutableArray new];
     self.installQueue = [NSMutableArray new];
     
-    // Setup search controller.
+    // Setup modern search controller.
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
@@ -357,13 +359,13 @@
         [versionAlert addAction:[UIAlertAction actionWithTitle:displayName
                                                          style:UIAlertActionStyleDefault
                                                        handler:^(UIAlertAction * _Nonnull action) {
-            // Ask user to choose between immediate install or adding to queue.
-            UIAlertController *confirmAlert = [UIAlertController alertControllerWithTitle:@"Install or Queue?"
-                                                                                    message:@"Would you like to install this mod now or add it to the install queue?"
-                                                                             preferredStyle:UIAlertControllerStyleAlert];
-            [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Install Now"
-                                                             style:UIAlertActionStyleDefault
-                                                           handler:^(UIAlertAction * _Nonnull action) {
+            // Prompt user to either install immediately or add to queue.
+            UIAlertController *choiceAlert = [UIAlertController alertControllerWithTitle:@"Install or Queue?"
+                                                                                   message:@"Choose to install now or add to the install queue."
+                                                                            preferredStyle:UIAlertControllerStyleAlert];
+            [choiceAlert addAction:[UIAlertAction actionWithTitle:@"Install Now"
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(UIAlertAction * _Nonnull action) {
                 if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
                     [self.modrinth installModFromDetail:mod atIndex:idx];
                 } else {
@@ -378,25 +380,23 @@
                     }
                 }
             }]];
-            [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Add to Queue"
-                                                             style:UIAlertActionStyleDefault
-                                                           handler:^(UIAlertAction * _Nonnull action) {
-                // Add mod and selected version to the queue.
+            [choiceAlert addAction:[UIAlertAction actionWithTitle:@"Add to Queue"
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(UIAlertAction * _Nonnull action) {
                 NSDictionary *queueEntry = @{@"mod": mod, @"versionIndex": @(idx)};
                 [self.installQueue addObject:queueEntry];
                 [self updateQueueButtonTitle];
                 presentAlertDialog(@"Added to Queue", [NSString stringWithFormat:@"\"%@\" has been added to the install queue.", mod[@"title"]]);
             }]];
-            [confirmAlert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
-                                                             style:UIAlertActionStyleCancel
-                                                           handler:nil]];
-            [self presentViewController:confirmAlert animated:YES completion:nil];
+            [choiceAlert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
+                                                            style:UIAlertActionStyleCancel
+                                                          handler:nil]];
+            [self presentViewController:choiceAlert animated:YES completion:nil];
         }]];
     }
     [versionAlert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                                      style:UIAlertActionStyleCancel
                                                    handler:nil]];
-    // For iPad, anchor to the tapped cell.
     if (versionAlert.popoverPresentationController) {
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
         if (cell) {
