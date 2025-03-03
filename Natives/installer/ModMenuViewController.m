@@ -23,16 +23,16 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 
-@interface ModMenuViewController ()
+@interface ModMenuViewController () <UISearchResultsUpdating, UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UISegmentedControl *apiSegmentedControl;
 @property (nonatomic, strong) NSMutableArray *modsList;
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
-// New properties for profile selection.
+// New properties for profile filtering.
 @property (nonatomic, strong) NSString *selectedProfileName;
-@property (nonatomic, strong) NSString *selectedMCVersion;  // Only used for filtering versions in the dropdown.
+@property (nonatomic, strong) NSString *selectedMCVersion;  // This value is used solely for filtering versions.
 @end
 
 @implementation ModMenuViewController
@@ -43,7 +43,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.title = @"Mods";
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:(CONFIG_CURSEFORGE_API_KEY ?: @"")];
-    // Do not add the mcVersion to search filters – that will be applied only in the version dropdown.
+    // Do not add mcVersion into searchFilters here. It will only be used for filtering the version dropdown.
     self.searchFilters = [@{@"isModpack": @(NO), @"name": @" "} mutableCopy];
     self.modsList = [NSMutableArray new];
     
@@ -65,8 +65,14 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                                                             target:self
                                                                             action:@selector(actionChooseProfile)];
     
+    // Set tableView delegate and dataSource if not set in Interface Builder.
+    self.tableView.delegate = self;
+    self.tableView.dataSource = self;
+    
     [self updateModsList];
 }
+
+#pragma mark - Profile Selection
 
 - (void)actionChooseProfile {
     NSDictionary *profiles = [PLProfiles current].profiles;
@@ -92,19 +98,22 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
             } else {
                 self.selectedMCVersion = lastVersionId;
             }
-            // Do not modify searchFilters here – the selectedMCVersion will only be applied in the version dropdown.
-            // Optionally, you can update the UI or display the selected profile info.
+            // Do not alter searchFilters for mod search.
+            NSLog(@"Selected profile: %@, Minecraft version: %@", self.selectedProfileName, self.selectedMCVersion);
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
+    // For iPad support.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
                                                                 self.view.bounds.size.height,
                                                                 1, 1);
     [self presentViewController:alert animated:YES completion:nil];
 }
+
+#pragma mark - Mod Search
 
 - (void)updateModsList {
     NSString *name = self.searchController.searchBar.text;
@@ -145,6 +154,8 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self performSelector:@selector(updateModsList) withObject:nil afterDelay:0.5];
 }
 
+#pragma mark - UITableView DataSource & Delegate
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 1;
 }
@@ -174,6 +185,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         [self loadModDetailsForMod:mod atIndexPath:indexPath];
     }
 }
+
 - (void)loadModDetailsForMod:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     __block NSMutableDictionary *modMutable = [mod mutableCopy];
     if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
@@ -207,11 +219,12 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *gameVersionsArray = mod[@"gameVersions"]; // Each element is an array of supported game versions.
+    NSArray *gameVersionsArray = mod[@"gameVersions"]; // Each element should be an array of supported game_versions.
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
+    NSLog(@"showModDetails: gameVersions: %@", gameVersionsArray);
     
-    // Filter versions only based on selectedMCVersion.
+    // If no profile Minecraft version is selected, alert the user.
     if (self.selectedMCVersion.length == 0) {
         presentAlertDialog(localize(@"Error", nil), @"No profile Minecraft version selected. Please choose a profile first.");
         return;
@@ -219,9 +232,14 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
+    
     for (NSUInteger i = 0; i < versionNames.count; i++) {
+        // Ensure the gameVersions entry is an array.
         NSArray *gv = gameVersionsArray[i];
-        // Include only if the selectedMCVersion is in the gameVersions array.
+        if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) {
+            continue;
+        }
+        // Include only if the selectedMCVersion is in the array.
         if ([gv containsObject:self.selectedMCVersion]) {
             [supportedIndices addObject:@(i)];
             NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
