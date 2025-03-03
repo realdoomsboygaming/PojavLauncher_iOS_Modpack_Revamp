@@ -58,7 +58,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self.apiSegmentedControl addTarget:self action:@selector(updateModsList) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.apiSegmentedControl;
     
-    // Add a left navigation bar button for profile selection.
+    // Add a left navigation button for profile selection.
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Profile"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:self
@@ -68,7 +68,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 }
 
 - (void)actionChooseProfile {
-    // Get profiles from PLProfiles.
     NSDictionary *profiles = [PLProfiles current].profiles;
     if (!profiles || profiles.count == 0) {
         presentAlertDialog(localize(@"Error", nil), @"No profiles available.");
@@ -78,14 +77,12 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Profile"
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    
     for (NSDictionary *profile in profiles.allValues) {
         NSString *name = profile[@"name"];
         [alert addAction:[UIAlertAction actionWithTitle:name
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
             self.selectedProfileName = name;
-            // Parse Minecraft version from lastVersionId.
             NSString *lastVersionId = profile[@"lastVersionId"];
             NSRange dashRange = [lastVersionId rangeOfString:@"-"];
             if (dashRange.location != NSNotFound) {
@@ -93,20 +90,15 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
             } else {
                 self.selectedMCVersion = lastVersionId;
             }
-            // Update search filters.
             self.searchFilters[@"mcVersion"] = self.selectedMCVersion;
             [self updateModsList];
         }]];
     }
-    
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    
-    // For iPad compatibility.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2, self.view.bounds.size.height, 1, 1);
-    
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -211,7 +203,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *mcVersionNames = mod[@"mcVersionNames"];
+    NSArray *gameVersionsArray = mod[@"gameVersions"];  // Each element is an array of game_versions.
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     
@@ -219,18 +211,20 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
+    
     for (NSUInteger i = 0; i < versionNames.count; i++) {
         NSString *version = versionNames[i];
-        NSString *mcVersion = mcVersionNames[i];
+        NSArray *gv = gameVersionsArray[i];
         if (filterMC && filterMC.length > 0) {
-            if ([version rangeOfString:filterMC].location != NSNotFound) {
+            if ([gv containsObject:filterMC]) {
                 [supportedIndices addObject:@(i)];
-                NSString *displayName = [version isEqualToString:mcVersion] ? version : [NSString stringWithFormat:@"%@ - %@", version, mcVersion];
+                NSString *displayName = [version stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
                 [supportedDisplayNames addObject:displayName];
             }
         } else {
             [supportedIndices addObject:@(i)];
-            [supportedDisplayNames addObject:version];
+            NSString *displayName = [version stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
+            [supportedDisplayNames addObject:displayName];
         }
     }
     
@@ -255,6 +249,5 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
-
 
 @end
