@@ -59,21 +59,26 @@
         return;
     }
     NSMutableArray *versionNames = [NSMutableArray new];
-    NSMutableArray *gameVersionsArray = [NSMutableArray new]; // Each element will be an array of supported game_versions.
+    NSMutableArray *gameVersionsArray = [NSMutableArray new]; // Each element is an array of supported game_versions.
     NSMutableArray *versionUrls = [NSMutableArray new];
     NSMutableArray *versionSizes = [NSMutableArray new];
     NSMutableArray *versionHashes = [NSMutableArray new];
     
     for (NSDictionary *versionDict in response) {
-        NSString *name = versionDict[@"name"] ?: @"";
+        // Use "version_number" if available; otherwise fall back to "name".
+        NSString *versionDisplay = versionDict[@"version_number"] ?: versionDict[@"name"] ?: @"";
         NSArray *supportedGameVersions = versionDict[@"game_versions"] ?: @[];
         NSDictionary *file = [versionDict[@"files"] firstObject];
+        if (!file) {
+            NSLog(@"loadDetailsOfModSync: Missing file info for version %@", versionDict);
+            continue;
+        }
         NSString *url = file[@"url"] ?: @"";
         NSNumber *size = file[@"size"] ?: @0;
         NSDictionary *hashes = file[@"hashes"];
         NSString *sha1 = hashes[@"sha1"] ?: @"";
         
-        [versionNames addObject:name];
+        [versionNames addObject:versionDisplay];
         [gameVersionsArray addObject:supportedGameVersions];
         [versionUrls addObject:url];
         [versionSizes addObject:size];
@@ -107,7 +112,8 @@
         NSMutableArray *versionHashes = [NSMutableArray new];
         
         for (NSDictionary *versionDict in response) {
-            NSString *name = versionDict[@"name"] ?: @"";
+            // Use "version_number" if available; otherwise, fall back to "name".
+            NSString *versionDisplay = versionDict[@"version_number"] ?: versionDict[@"name"] ?: @"";
             NSArray *supportedGameVersions = versionDict[@"game_versions"] ?: @[];
             NSDictionary *file = [versionDict[@"files"] firstObject];
             if (!file) {
@@ -119,7 +125,7 @@
             NSDictionary *hashes = file[@"hashes"];
             NSString *sha1 = hashes[@"sha1"] ?: @"";
             
-            [versionNames addObject:name];
+            [versionNames addObject:versionDisplay];
             [gameVersionsArray addObject:supportedGameVersions];
             [versionUrls addObject:url];
             [versionSizes addObject:size];
@@ -138,7 +144,7 @@
 }
 
 // New method for installing individual mods.
-// Posts a notification named "InstallMod" with mod details and selected version index.
+// Posts a notification named "InstallMod" with the mod details and selected version index.
 - (void)installModFromDetail:(NSDictionary *)modDetail atIndex:(NSUInteger)selectedVersion {
     NSDictionary *userInfo = @{@"detail": modDetail, @"index": @(selectedVersion)};
     [[NSNotificationCenter defaultCenter] postNotificationName:@"InstallMod" object:self userInfo:userInfo];
