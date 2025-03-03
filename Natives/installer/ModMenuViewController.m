@@ -58,7 +58,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self.apiSegmentedControl addTarget:self action:@selector(updateModsList) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.apiSegmentedControl;
     
-    // Add a left navigation button for profile selection.
+    // Add a left navigation bar button for profile selection.
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Profile"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:self
@@ -83,6 +83,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
             self.selectedProfileName = name;
+            // Parse Minecraft version from lastVersionId (assumes format like "1.16.5-forge-36.2.0").
             NSString *lastVersionId = profile[@"lastVersionId"];
             NSRange dashRange = [lastVersionId rangeOfString:@"-"];
             if (dashRange.location != NSNotFound) {
@@ -203,39 +204,32 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *gameVersionsArray = mod[@"gameVersions"];  // Each element is an array of game_versions.
+    NSArray *gameVersionsArray = mod[@"gameVersions"]; // Each element is an array of game_versions.
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     
-    NSString *filterMC = self.selectedMCVersion;
+    // Filter to include only versions supported by the selected Minecraft version.
+    if (self.selectedMCVersion.length == 0) {
+        presentAlertDialog(localize(@"Error", nil), @"No profile Minecraft version selected. Please choose a profile first.");
+        return;
+    }
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     
     for (NSUInteger i = 0; i < versionNames.count; i++) {
-        NSString *version = versionNames[i];
         NSArray *gv = gameVersionsArray[i];
-        if (filterMC && filterMC.length > 0) {
-            if ([gv containsObject:filterMC]) {
-                [supportedIndices addObject:@(i)];
-                NSString *displayName = [version stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
-                [supportedDisplayNames addObject:displayName];
-            }
-        } else {
+        // Only include if the selectedMCVersion is in the array of supported game versions.
+        if ([gv containsObject:self.selectedMCVersion]) {
             [supportedIndices addObject:@(i)];
-            NSString *displayName = [version stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
+            NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
             [supportedDisplayNames addObject:displayName];
         }
     }
     
     if (supportedIndices.count == 0) {
-        NSLog(@"showModDetails: No supported versions found, falling back to all versions.");
-        supportedIndices = [NSMutableArray array];
-        supportedDisplayNames = [NSMutableArray array];
-        for (NSUInteger i = 0; i < versionNames.count; i++) {
-            [supportedIndices addObject:@(i)];
-            [supportedDisplayNames addObject:versionNames[i]];
-        }
+        presentAlertDialog(localize(@"Error", nil), @"No supported versions available for your selected profile.");
+        return;
     }
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
