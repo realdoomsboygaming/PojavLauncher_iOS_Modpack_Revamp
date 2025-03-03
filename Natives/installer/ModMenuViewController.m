@@ -29,6 +29,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
+// New properties for profile filtering:
+@property (nonatomic, strong) NSString *selectedProfileName;
+@property (nonatomic, strong) NSString *selectedMCVersion;
 @end
 
 @implementation ModMenuViewController
@@ -42,17 +45,54 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.searchFilters = [@{@"isModpack": @(NO), @"name": @" "} mutableCopy];
     self.modsList = [NSMutableArray new];
     
+    // Setup search controller.
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.navigationItem.searchController = self.searchController;
     
+    // Setup API segmented control.
     self.apiSegmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"Modrinth", @"CurseForge"]];
     self.apiSegmentedControl.selectedSegmentIndex = 0;
     [self.apiSegmentedControl addTarget:self action:@selector(updateModsList) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.apiSegmentedControl;
     
+    // Add a left navigation bar button for profile selection.
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Profile"
+                                                                             style:UIBarButtonItemStylePlain
+                                                                            target:self
+                                                                            action:@selector(actionChooseProfile)];
+    
     [self updateModsList];
+}
+
+- (void)actionChooseProfile {
+    // Get profiles from PLProfiles.
+    NSDictionary *profiles = [PLProfiles current].profiles;
+    if (!profiles || profiles.count == 0) {
+        presentAlertDialog(localize(@"Error", nil), @"No profiles available.");
+        return;
+    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Profile" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [profiles.allValues enumerateObjectsUsingBlock:^(NSDictionary *profile, NSUInteger idx, BOOL *stop) {
+        NSString *name = profile[@"name"];
+        [alert addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            self.selectedProfileName = name;
+            // Parse the Minecraft version from the profile's lastVersionId.
+            NSString *lastVersionId = profile[@"lastVersionId"];
+            NSRange dashRange = [lastVersionId rangeOfString:@"-"];
+            if (dashRange.location != NSNotFound) {
+                self.selectedMCVersion = [lastVersionId substringToIndex:dashRange.location];
+            } else {
+                self.selectedMCVersion = lastVersionId;
+            }
+            // Update our search filter.
+            self.searchFilters[@"mcVersion"] = self.selectedMCVersion;
+            [self updateModsList];
+        }]];
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)updateModsList {
@@ -160,15 +200,25 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     
+    // If we have a selected Minecraft version from the profile, filter accordingly.
+    NSString *filterMC = self.selectedMCVersion;
+    
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     for (NSUInteger i = 0; i < versionNames.count; i++) {
         NSString *version = versionNames[i];
         NSString *mcVersion = mcVersionNames[i];
-        if ([version rangeOfString:mcVersion].location != NSNotFound) {
+        // If a profile version is selected, require that the version string contain that substring.
+        if (filterMC && filterMC.length > 0) {
+            if ([version rangeOfString:filterMC].location != NSNotFound) {
+                [supportedIndices addObject:@(i)];
+                NSString *displayName = [version isEqualToString:mcVersion] ? version : [NSString stringWithFormat:@"%@ - %@", version, mcVersion];
+                [supportedDisplayNames addObject:displayName];
+            }
+        } else {
+            // No profile selected; include all.
             [supportedIndices addObject:@(i)];
-            NSString *displayName = [version isEqualToString:mcVersion] ? version : [NSString stringWithFormat:@"%@ - %@", version, mcVersion];
-            [supportedDisplayNames addObject:displayName];
+            [supportedDisplayNames addObject:version];
         }
     }
     
@@ -187,6 +237,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         NSUInteger idx = [supportedIndices[j] unsignedIntegerValue];
         NSString *displayName = supportedDisplayNames[j];
         [alert addAction:[UIAlertAction actionWithTitle:displayName style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            // Now install the mod to the selected profile using the new installation method.
             [self.modrinth installModFromDetail:mod atIndex:idx];
         }]];
     }
