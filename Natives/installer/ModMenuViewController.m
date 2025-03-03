@@ -30,7 +30,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
-// New properties for profile selection.
 @property (nonatomic, strong) NSString *selectedProfileName;
 @property (nonatomic, strong) NSString *selectedMCVersion;
 @end
@@ -102,8 +101,8 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     alert.popoverPresentationController.sourceView = self.view;
-    alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
-                                                                self.view.bounds.size.height,
+    alert.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                                                                CGRectGetMidY(self.view.bounds),
                                                                 1, 1);
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -222,11 +221,8 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    // Fix: Use 'gameVersions' for Modrinth and fallback to 'mcVersionNames' for CurseForge.
+    // Use 'gameVersions' for Modrinth and fallback to 'mcVersionNames' for CurseForge.
     NSArray *gameVersionsArray = mod[@"gameVersions"] ?: mod[@"mcVersionNames"];
-    
-    NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
-    NSLog(@"showModDetails: gameVersions: %@", gameVersionsArray);
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
@@ -238,7 +234,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
         }
     } else {
         for (NSUInteger i = 0; i < versionNames.count; i++) {
-            // Ensure gameVersionsArray element is an array; if it's a string, wrap it.
             id gvItem = gameVersionsArray[i];
             NSArray *gv = [gvItem isKindOfClass:[NSArray class]] ? gvItem : (@[gvItem]);
             if (gv.count == 0) continue;
@@ -248,36 +243,34 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                 [supportedDisplayNames addObject:displayName];
             }
         }
-    }
-    
-    if (supportedIndices.count == 0) {
-        presentAlertDialog(localize(@"Error", nil), @"No supported versions available for your selected profile.");
-        return;
+        if (supportedIndices.count == 0) {
+            for (NSUInteger i = 0; i < versionNames.count; i++) {
+                [supportedIndices addObject:@(i)];
+                [supportedDisplayNames addObject:versionNames[i]];
+            }
+        }
     }
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version"
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak typeof(self) weakSelf = self;
     for (NSUInteger j = 0; j < supportedIndices.count; j++) {
         NSUInteger idx = [supportedIndices[j] unsignedIntegerValue];
         NSString *displayName = supportedDisplayNames[j];
         [alert addAction:[UIAlertAction actionWithTitle:displayName
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) return;
-            if (strongSelf.apiSegmentedControl.selectedSegmentIndex == 0) {
-                [strongSelf.modrinth installModFromDetail:mod atIndex:idx];
+            if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
+                [self.modrinth installModFromDetail:mod atIndex:idx];
             } else {
                 if ([mod[@"isModpack"] boolValue]) {
-                    [strongSelf.curseForge installModpackFromDetail:mod atIndex:idx completion:^(NSError *error) {
+                    [self.curseForge installModpackFromDetail:mod atIndex:idx completion:^(NSError *error) {
                         if (error) {
                             presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
                         }
                     }];
                 } else {
-                    [strongSelf.curseForge installModFromDetail:mod atIndex:idx];
+                    [self.curseForge installModFromDetail:mod atIndex:idx];
                 }
             }
         }]];
@@ -285,10 +278,15 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    alert.popoverPresentationController.sourceView = self.view;
-    alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
-                                                                self.view.bounds.size.height,
-                                                                1, 1);
+    // Properly configure popover presentation for iPad.
+    if (alert.popoverPresentationController) {
+        if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+            alert.popoverPresentationController.sourceView = self.view;
+            alert.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                                                                        CGRectGetMidY(self.view.bounds),
+                                                                        1, 1);
+        }
+    }
     [self presentViewController:alert animated:YES completion:nil];
 }
 
