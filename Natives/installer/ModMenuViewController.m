@@ -6,7 +6,7 @@
 #import "utils.h"
 #import "PLProfiles.h"
 
-// Inline helper to display alerts.
+// Helper to display alerts.
 static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                    message:message
@@ -30,7 +30,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
-// New properties for profile selection – used only for filtering the version dropdown.
 @property (nonatomic, strong) NSString *selectedProfileName;
 @property (nonatomic, strong) NSString *selectedMCVersion;
 @end
@@ -43,7 +42,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.title = @"Mods";
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:(CONFIG_CURSEFORGE_API_KEY ?: @"")];
-    // Do not include mcVersion in searchFilters so that mod search remains unaffected.
     self.searchFilters = [@{@"isModpack": @(NO), @"name": @""} mutableCopy];
     self.modsList = [NSMutableArray new];
     
@@ -59,7 +57,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self.apiSegmentedControl addTarget:self action:@selector(updateModsList) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.apiSegmentedControl;
     
-    // Add a left bar button for profile selection.
+    // Add profile selection button.
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Profile"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:self
@@ -89,7 +87,6 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
             self.selectedProfileName = name;
-            // Parse the Minecraft version from lastVersionId (using substring before the first dash).
             NSString *lastVersionId = profile[@"lastVersionId"];
             NSRange dashRange = [lastVersionId rangeOfString:@"-"];
             if (dashRange.location != NSNotFound) {
@@ -98,13 +95,11 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                 self.selectedMCVersion = lastVersionId;
             }
             NSLog(@"Selected profile: %@, Minecraft version: %@", self.selectedProfileName, self.selectedMCVersion);
-            // The selectedMCVersion is used only for filtering versions in the dropdown.
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    // For iPad compatibility.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
                                                                 self.view.bounds.size.height,
@@ -123,14 +118,16 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)refreshModsListWithPrevList:(BOOL)prevList {
     if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
+        __weak typeof(self) weakSelf = self;
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            NSMutableArray *results = [self.modrinth searchModWithFilters:self.searchFilters previousPageResult:(prevList ? self.modsList : nil)];
+            NSMutableArray *results = [weakSelf.modrinth searchModWithFilters:weakSelf.searchFilters previousPageResult:(prevList ? weakSelf.modsList : nil)];
             dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (results) {
-                    self.modsList = results;
-                    [self.tableView reloadData];
+                    strongSelf.modsList = results;
+                    [strongSelf.tableView reloadData];
                 } else {
-                    presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                    presentAlertDialog(localize(@"Error", nil), strongSelf.modrinth.lastError.localizedDescription);
                 }
             });
         });
@@ -190,15 +187,17 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)loadModDetailsForMod:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     __block NSMutableDictionary *modMutable = [mod mutableCopy];
+    __weak typeof(self) weakSelf = self;
     if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self.modrinth loadDetailsOfMod:modMutable completion:^(NSError *error) {
+            [weakSelf.modrinth loadDetailsOfMod:modMutable completion:^(NSError *error) {
                 dispatch_async(dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
                     if ([modMutable[@"versionDetailsLoaded"] boolValue]) {
-                        [self.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
-                        [self showModDetails:modMutable atIndexPath:indexPath];
+                        [strongSelf.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
+                        [strongSelf showModDetails:modMutable atIndexPath:indexPath];
                     } else {
-                        presentAlertDialog(localize(@"Error", nil), self.modrinth.lastError.localizedDescription);
+                        presentAlertDialog(localize(@"Error", nil), strongSelf.modrinth.lastError.localizedDescription);
                     }
                 });
             }];
@@ -206,11 +205,12 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     } else {
         [self.curseForge loadDetailsOfMod:modMutable completion:^(NSError *error) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
                 if ([modMutable[@"versionDetailsLoaded"] boolValue]) {
-                    [self.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
-                    [self showModDetails:modMutable atIndexPath:indexPath];
+                    [strongSelf.modsList replaceObjectAtIndex:indexPath.row withObject:modMutable];
+                    [strongSelf showModDetails:modMutable atIndexPath:indexPath];
                 } else {
-                    presentAlertDialog(localize(@"Error", nil), self.curseForge.lastError.localizedDescription);
+                    presentAlertDialog(localize(@"Error", nil), strongSelf.curseForge.lastError.localizedDescription);
                 }
             });
         }];
@@ -221,22 +221,17 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *gameVersionsArray = mod[@"gameVersions"];  // Each element should be an array of supported game_versions.
-    
-    NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
-    NSLog(@"showModDetails: gameVersions: %@", gameVersionsArray);
+    NSArray *gameVersionsArray = mod[@"gameVersions"];
     
     NSMutableArray<NSNumber *> *supportedIndices = [NSMutableArray array];
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     
-    // If no profile is selected, show all versions.
     if (self.selectedMCVersion.length == 0) {
         for (NSUInteger i = 0; i < versionNames.count; i++) {
             [supportedIndices addObject:@(i)];
             [supportedDisplayNames addObject:versionNames[i]];
         }
     } else {
-        // Filter versions by checking if the selectedMCVersion is present in each version's gameVersions array.
         for (NSUInteger i = 0; i < versionNames.count; i++) {
             NSArray *gv = gameVersionsArray[i];
             if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) continue;
@@ -256,13 +251,28 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select Version"
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
     for (NSUInteger j = 0; j < supportedIndices.count; j++) {
         NSUInteger idx = [supportedIndices[j] unsignedIntegerValue];
         NSString *displayName = supportedDisplayNames[j];
         [alert addAction:[UIAlertAction actionWithTitle:displayName
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
-            [self.modrinth installModFromDetail:mod atIndex:idx];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            if (strongSelf.apiSegmentedControl.selectedSegmentIndex == 0) {
+                [strongSelf.modrinth installModFromDetail:mod atIndex:idx];
+            } else {
+                if ([mod[@"isModpack"] boolValue]) {
+                    [strongSelf.curseForge installModpackFromDetail:mod atIndex:idx completion:^(NSError *error) {
+                        if (error) {
+                            presentAlertDialog(localize(@"Error", nil), error.localizedDescription);
+                        }
+                    }];
+                } else {
+                    [strongSelf.curseForge installModFromDetail:mod atIndex:idx];
+                }
+            }
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
