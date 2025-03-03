@@ -4,6 +4,7 @@
 #import "config.h"
 #import "UIKit+AFNetworking.h"
 #import "utils.h"
+#import "PLProfiles.h"
 
 // Inline helper to display alerts.
 static inline void presentAlertDialog(NSString *title, NSString *message) {
