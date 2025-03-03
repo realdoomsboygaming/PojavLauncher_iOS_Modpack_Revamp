@@ -16,9 +16,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                             handler:nil]];
     UIWindow *window = nil;
     if (@available(iOS 13.0, *)) {
-         window = [UIApplication sharedApplication].windows.firstObject;
+        window = [UIApplication sharedApplication].windows.firstObject;
     } else {
-         window = [UIApplication sharedApplication].keyWindow;
+        window = [UIApplication sharedApplication].keyWindow;
     }
     [window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
@@ -30,9 +30,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 @property (nonatomic, strong) ModrinthAPI *modrinth;
 @property (nonatomic, strong) CurseForgeAPI *curseForge;
 @property (nonatomic, strong) NSMutableDictionary *searchFilters;
-// New properties for profile filtering.
+// Profile selection – used only for filtering the version dropdown.
 @property (nonatomic, strong) NSString *selectedProfileName;
-@property (nonatomic, strong) NSString *selectedMCVersion;  // This value is used solely for filtering versions.
+@property (nonatomic, strong) NSString *selectedMCVersion;
 @end
 
 @implementation ModMenuViewController
@@ -43,8 +43,8 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     self.title = @"Mods";
     self.modrinth = [ModrinthAPI new];
     self.curseForge = [[CurseForgeAPI alloc] initWithAPIKey:(CONFIG_CURSEFORGE_API_KEY ?: @"")];
-    // Do not add mcVersion into searchFilters here. It will only be used for filtering the version dropdown.
-    self.searchFilters = [@{@"isModpack": @(NO), @"name": @" "} mutableCopy];
+    // Do not add mcVersion to searchFilters here.
+    self.searchFilters = [@{@"isModpack": @(NO), @"name": @""} mutableCopy];
     self.modsList = [NSMutableArray new];
     
     // Setup search controller.
@@ -59,13 +59,12 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self.apiSegmentedControl addTarget:self action:@selector(updateModsList) forControlEvents:UIControlEventValueChanged];
     self.tableView.tableHeaderView = self.apiSegmentedControl;
     
-    // Add a left navigation bar button for profile selection.
+    // Add a left bar button for profile selection.
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Profile"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:self
                                                                             action:@selector(actionChooseProfile)];
     
-    // Set tableView delegate and dataSource if not set in Interface Builder.
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     
@@ -90,7 +89,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction * _Nonnull action) {
             self.selectedProfileName = name;
-            // Parse the Minecraft version from the profile's lastVersionId.
+            // Parse Minecraft version from lastVersionId (use substring before first dash).
             NSString *lastVersionId = profile[@"lastVersionId"];
             NSRange dashRange = [lastVersionId rangeOfString:@"-"];
             if (dashRange.location != NSNotFound) {
@@ -98,14 +97,14 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
             } else {
                 self.selectedMCVersion = lastVersionId;
             }
-            // Do not alter searchFilters for mod search.
             NSLog(@"Selected profile: %@, Minecraft version: %@", self.selectedProfileName, self.selectedMCVersion);
+            // Do not change searchFilters – this version filter is only used later.
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    // For iPad support.
+    // For iPad.
     alert.popoverPresentationController.sourceView = self.view;
     alert.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2,
                                                                 self.view.bounds.size.height,
@@ -125,7 +124,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 - (void)refreshModsListWithPrevList:(BOOL)prevList {
     if (self.apiSegmentedControl.selectedSegmentIndex == 0) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            NSMutableArray *results = [self.modrinth searchModWithFilters:self.searchFilters previousPageResult:prevList ? self.modsList : nil];
+            NSMutableArray *results = [self.modrinth searchModWithFilters:self.searchFilters previousPageResult:(prevList ? self.modsList : nil)];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
                     self.modsList = results;
@@ -136,7 +135,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
             });
         });
     } else {
-        [self.curseForge searchModWithFilters:self.searchFilters previousPageResult:prevList ? self.modsList : nil completion:^(NSMutableArray *results, NSError *error) {
+        [self.curseForge searchModWithFilters:self.searchFilters previousPageResult:(prevList ? self.modsList : nil) completion:^(NSMutableArray *results, NSError *error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (results) {
                     self.modsList = results;
@@ -154,7 +153,7 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [self performSelector:@selector(updateModsList) withObject:nil afterDelay:0.5];
 }
 
-#pragma mark - UITableView DataSource & Delegate
+#pragma mark - UITableView DataSource
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 1;
@@ -176,12 +175,15 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     [cell.imageView setImageWithURL:[NSURL URLWithString:mod[@"imageUrl"]] placeholderImage:placeholder];
     return cell;
 }
+
+#pragma mark - UITableView Delegate
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     NSDictionary *mod = self.modsList[indexPath.row];
     if ([mod[@"versionDetailsLoaded"] boolValue]) {
         [self showModDetails:mod atIndexPath:indexPath];
     } else {
-        [tableView deselectRowAtIndexPath:indexPath animated:NO];
+        [tableView deselectRowAtIndexPath:indexPath animated:YES];
         [self loadModDetailsForMod:mod atIndexPath:indexPath];
     }
 }
@@ -219,12 +221,11 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
 
 - (void)showModDetails:(NSDictionary *)mod atIndexPath:(NSIndexPath *)indexPath {
     NSArray *versionNames = mod[@"versionNames"];
-    NSArray *gameVersionsArray = mod[@"gameVersions"]; // Each element should be an array of supported game_versions.
+    NSArray *gameVersionsArray = mod[@"gameVersions"];  // Each element is an array of supported game_versions.
     
     NSLog(@"showModDetails: Loaded %lu versions", (unsigned long)versionNames.count);
     NSLog(@"showModDetails: gameVersions: %@", gameVersionsArray);
     
-    // If no profile Minecraft version is selected, alert the user.
     if (self.selectedMCVersion.length == 0) {
         presentAlertDialog(localize(@"Error", nil), @"No profile Minecraft version selected. Please choose a profile first.");
         return;
@@ -234,12 +235,9 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     NSMutableArray<NSString *> *supportedDisplayNames = [NSMutableArray array];
     
     for (NSUInteger i = 0; i < versionNames.count; i++) {
-        // Ensure the gameVersions entry is an array.
+        // Ensure that each gameVersions entry is an array.
         NSArray *gv = gameVersionsArray[i];
-        if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) {
-            continue;
-        }
-        // Include only if the selectedMCVersion is in the array.
+        if (![gv isKindOfClass:[NSArray class]] || gv.count == 0) continue;
         if ([gv containsObject:self.selectedMCVersion]) {
             [supportedIndices addObject:@(i)];
             NSString *displayName = [versionNames[i] stringByAppendingFormat:@" (%@)", [gv componentsJoinedByString:@", "]];
@@ -256,11 +254,15 @@ static inline void presentAlertDialog(NSString *title, NSString *message) {
     for (NSUInteger j = 0; j < supportedIndices.count; j++) {
         NSUInteger idx = [supportedIndices[j] unsignedIntegerValue];
         NSString *displayName = supportedDisplayNames[j];
-        [alert addAction:[UIAlertAction actionWithTitle:displayName style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        [alert addAction:[UIAlertAction actionWithTitle:displayName
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction * _Nonnull action) {
             [self.modrinth installModFromDetail:mod atIndex:idx];
         }]];
     }
-    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:localize(@"Cancel", nil)
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
