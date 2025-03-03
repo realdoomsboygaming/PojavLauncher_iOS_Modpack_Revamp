@@ -48,7 +48,9 @@
 
 // Backward compatibility: call the asynchronous version with nil completion.
 - (void)loadDetailsOfMod:(NSMutableDictionary *)item {
-    [self loadDetailsOfMod:item completion:nil];
+    [self loadDetailsOfMod:item completion:^(NSError *error) {
+        // Empty completion block.
+    }];
 }
 
 // Synchronous version for use on background threads.
